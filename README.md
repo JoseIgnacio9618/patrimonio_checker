@@ -7,14 +7,14 @@ Aplicación privada de patrimonio personal, con Angular, Apache ECharts, Node.js
 Necesitas **Node.js 24** (24.13 o posterior, dentro de la rama 24) y npm. Funciona sin crear cuentas, configurar un servidor de base de datos ni conectar Trade Republic.
 
 ```sh
-git clone https://github.com/JoseIgnacio9618/patrimonio.git
-cd patrimonio
+git clone https://github.com/JoseIgnacio9618/patrimonio_checker.git
+cd patrimonio_checker
 npm ci
 npm run build
 npm start
 ```
 
-Abre **http://127.0.0.1:3000**. El repositorio es privado: clónalo con tu cuenta de GitHub autenticada. Ejecuta los comandos desde la raíz del proyecto.
+Abre **http://127.0.0.1:3000**. El repositorio de código es público; los datos financieros se guardan únicamente en tu instalación local y están excluidos de Git. Ejecuta los comandos desde la raíz del proyecto.
 
 Para desarrollar con recarga automática:
 
