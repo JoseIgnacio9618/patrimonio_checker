@@ -6,6 +6,7 @@ export interface Transaction {
   id: string; date: string; type: TransactionType; asset: string; name: string;
   category: Category; quantity: string; amount: string; fee: string; tax: string;
   currency: 'EUR'; costBasis: string | null; note: string;
+  acquisitionDate?: string | null;
 }
 export interface Price { asset: string; date: string; price: string; }
 export type Mapping = Partial<Record<keyof Omit<Transaction, 'id'> | 'id', string>>;

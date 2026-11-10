@@ -15,7 +15,7 @@
             "browser": "web/main.ts",
             "tsConfig": "tsconfig.app.json",
             "index": "web/index.html",
-            "styles": ["web/styles.css"],
+            "styles": ["web/theme.css", "web/styles.css"],
             "assets": [{ "glob": "**/*", "input": "public" }]
           },
           "configurations": {

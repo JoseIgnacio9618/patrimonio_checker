@@ -1,0 +1,518 @@
+<section class="card fiscal-year">
+  <div>
+    <h2>¿Qué ejercicio quieres revisar?</h2>
+    <p>
+      El año de las ventas y las rentas determina la normativa. La declaración
+      se presenta normalmente al año siguiente.
+    </p>
+  </div>
+  <form (ngSubmit)="openYear()">
+    <label
+      >Ejercicio fiscal<input
+        name="taxYear"
+        type="number"
+        min="2010"
+        max="2100"
+        placeholder="Por ejemplo, 2026"
+        [(ngModel)]="year"
+        required /></label
+    ><button class="button primary" [disabled]="busy()">
+      Abrir ejercicio →
+    </button>
+  </form>
+</section>
+@if (error()) {
+  <div class="message error" role="alert">{{ error() }}</div>
+}
+@if (notice()) {
+  <div class="message success" role="status">{{ notice() }}</div>
+}
+@if (busy()) {
+  <div class="loading" role="status">Preparando los datos fiscales…</div>
+}
+@if (report(); as r) {
+  <section class="card fiscal-rules">
+    <div class="card-heading">
+      <div>
+        <h2>1. Normativa del ejercicio {{ openedYear() }}</h2>
+        <p>
+          Formato → prompt → fichero de la IA → revisión → activación. Cada
+          ejercicio conserva su propio perfil.
+        </p>
+      </div>
+      <span class="pill">{{
+        r.rules ? "Perfil anual activo" : "Falta normativa anual"
+      }}</span>
+    </div>
+    <div class="fiscal-content">
+      <p class="muted">
+        El prompt contiene el año, el régimen común y las reglas que necesita el
+        motor. No incluye movimientos, importes de tu cartera ni datos
+        identificativos. La IA debe consultar fuentes oficiales; validar el
+        formato no certifica su contenido legal.
+      </p>
+      <div class="button-row">
+        <button
+          class="button subtle"
+          (click)="copyPrompt()"
+          [disabled]="busy()"
+        >
+          Copiar prompt para la IA</button
+        ><a class="button subtle" [href]="schemaUrl()" download
+          >Descargar esquema JSON</a
+        ><label class="button primary file-button"
+          >Importar fichero de normativa<input
+            type="file"
+            accept=".json,application/json"
+            (change)="readRules($event)"
+            [disabled]="busy()"
+        /></label>
+      </div>
+      <details class="prompt-panel">
+        <summary>Ver prompt completo</summary>
+        <textarea
+          readonly
+          [value]="prompt()"
+          aria-label="Prompt para investigar la normativa anual"
+        ></textarea>
+      </details>
+      @if (r.rules; as rules) {
+        <p class="muted">
+          Ejercicio {{ rules.year }} · territorio común · verificado por el
+          autor del fichero el {{ rules.verifiedAt }}.
+          <span>La activación refleja tu revisión.</span>
+        </p>
+        <div class="source-links">
+          @for (s of rules.sources; track s.url) {
+            <a [href]="s.url" target="_blank" rel="noopener noreferrer"
+              >{{ s.title }} ↗</a
+            >
+          }
+        </div>
+      }
+      @if (pending(); as p) {
+        <div class="rules-review">
+          <h3>Revisar antes de activar: {{ p.rules.year }}</h3>
+          <p>
+            Comprobado el formato y el ejercicio. Revisa estos valores con los
+            enlaces oficiales; la app no comprueba que la IA haya interpretado
+            bien la norma.
+          </p>
+          <div class="two-column">
+            @for (
+              part of [
+                { name: "Escala estatal", rows: p.rules.stateBrackets },
+                { name: "Escala autonómica", rows: p.rules.regionalBrackets },
+              ];
+              track part.name
+            ) {
+              <div class="table-wrap">
+                <h3>{{ part.name }}</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Hasta (acumulado)</th>
+                      <th class="numeric">Tipo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (b of part.rows; track $index) {
+                      <tr>
+                        <td>
+                          {{ b.upTo === null ? "Sin límite" : money(b.upTo) }}
+                        </td>
+                        <td class="numeric">{{ percent(b.rate) }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          </div>
+          <p>
+            Compensación cruzada: {{ percent(p.rules.crossOffsetLimit) }} ·
+            arrastre: {{ p.rules.carryYears }} años · recompra: cotizados
+            {{ p.rules.repurchaseMonths.listed }} meses, no cotizados
+            {{ p.rules.repurchaseMonths.unlisted }} meses, deuda
+            {{ p.rules.repurchaseMonths.debt }} meses.
+          </p>
+          <div class="source-links">
+            @for (s of p.rules.sources; track s.url) {
+              <a [href]="s.url" target="_blank" rel="noopener noreferrer"
+                >{{ s.title }} ↗</a
+              >
+            }
+          </div>
+          @for (note of p.rules.notes; track note) {
+            <p class="muted">{{ note }}</p>
+          }
+          <button
+            class="button primary"
+            (click)="activate()"
+            [disabled]="busy()"
+          >
+            He revisado las fuentes: activar perfil {{ p.rules.year }}
+          </button>
+        </div>
+      }
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-heading">
+      <div>
+        <h2>2. Tus datos fiscales de {{ openedYear() }}</h2>
+        <p>
+          Estos datos se guardan para este ejercicio. Las clasificaciones por
+          activo y la comisión de simulación se comparten.
+        </p>
+      </div>
+    </div>
+    <div class="fiscal-content">
+      <div class="fiscal-fields">
+        <label
+          >Residencia y régimen fiscal<select [(ngModel)]="settings.regime">
+            <option value="unconfirmed">Selecciona tu régimen</option>
+            <option value="common">Residente España · régimen común</option>
+            <option value="foral">
+              País Vasco / Navarra · sin cálculo en este motor
+            </option>
+            <option value="nonresident">
+              No residente · sin cálculo en este motor
+            </option>
+          </select></label
+        ><label
+          >Tratamiento confirmado del Saveback<select
+            [(ngModel)]="settings.saveback"
+          >
+            <option value="review">Pendiente de revisar</option>
+            <option value="savings">Incluir en rendimientos del ahorro</option>
+            <option value="exclude">Excluir de la base del ahorro</option>
+          </select></label
+        ><label
+          >Comisión prevista por venta (€)<input
+            type="number"
+            min="0"
+            step="0.01"
+            [(ngModel)]="config.saleFee"
+        /></label>
+      </div>
+      <label class="checkbox-label fiscal-confirm"
+        ><input type="checkbox" [(ngModel)]="settings.historyComplete" />Mi
+        historial aportado incluye las operaciones y costes de todos mis brokers
+        y exchanges para aplicar FIFO.</label
+      >
+      <details class="prompt-panel">
+        <summary>Otras rentas, retenciones y compensaciones</summary>
+        <div class="fiscal-fields">
+          <label
+            >Otros rendimientos netos del ahorro (€)<input
+              type="number"
+              step="0.01"
+              [(ngModel)]="settings.otherIncome" /></label
+          ><label
+            >Otras ganancias/pérdidas patrimoniales (€)<input
+              type="number"
+              step="0.01"
+              [(ngModel)]="settings.otherGains" /></label
+          ><label
+            >Pérdidas patrimoniales diferidas liberadas (€)<input
+              type="number"
+              min="0"
+              step="0.01"
+              [(ngModel)]="settings.releasedLosses" /></label
+          ><label
+            >Mínimo estatal remanente para el ahorro (€)<input
+              type="number"
+              min="0"
+              [(ngModel)]="settings.minimumState" /></label
+          ><label
+            >Mínimo autonómico remanente para el ahorro (€)<input
+              type="number"
+              min="0"
+              [(ngModel)]="settings.minimumRegional" /></label
+          ><label
+            >Retenciones españolas confirmadas (€)<input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Vacío si no lo has confirmado"
+              [(ngModel)]="settings.withholdings"
+          /></label>
+        </div>
+        <p class="muted">
+          Los mínimos remanentes se dejan en cero si ya se han aplicado en la
+          base general. El campo «Impuestos» del CSV puede incluir retenciones
+          extranjeras: no se descuenta automáticamente como pago a cuenta
+          español.
+        </p>
+        <h3>Pérdidas pendientes de ejercicios anteriores</h3>
+        @for (c of settings.carry; track $index) {
+          <div class="rule-row">
+            <label
+              >Ejercicio de origen<input
+                type="number"
+                [(ngModel)]="c.year" /></label
+            ><label
+              >Pérdida patrimonial pendiente (€)<input
+                type="number"
+                min="0"
+                [(ngModel)]="c.capital" /></label
+            ><label
+              >Rendimiento negativo pendiente (€)<input
+                type="number"
+                min="0"
+                [(ngModel)]="c.income" /></label
+            ><button
+              class="text-button danger"
+              (click)="settings.carry.splice($index, 1)"
+            >
+              Eliminar
+            </button>
+          </div>
+        }
+        <button class="button subtle" (click)="addCarry()">
+          Añadir saldo pendiente
+        </button>
+      </details>
+      <details class="prompt-panel">
+        <summary>Clasificación fiscal de cada activo</summary>
+        <p class="muted">
+          Revisa especialmente ETC de oro, deuda, fondos, mercados no regulados
+          y productos complejos. La categoría comercial no determina por sí sola
+          su tratamiento fiscal.
+        </p>
+        <div class="fiscal-fields">
+          @for (a of r.availableAssets; track a.asset) {
+            <label
+              >{{ a.name }} · {{ a.asset
+              }}<select
+                [ngModel]="config.assetKinds[a.asset] || a.kind"
+                (ngModelChange)="config.assetKinds[a.asset] = $event"
+              >
+                @for (k of kinds; track k.value) {
+                  <option [value]="k.value">{{ k.label }}</option>
+                }
+              </select></label
+            >
+          }
+        </div>
+      </details>
+      <button
+        class="button primary"
+        (click)="saveSettings()"
+        [disabled]="busy()"
+      >
+        Guardar y recalcular {{ openedYear() }}
+      </button>
+    </div>
+  </section>
+  <div class="section-label">
+    Ventas y rentas de {{ r.year }} · declaración normalmente en
+    {{ r.filingYear }}
+  </div>
+  <div class="kpi-grid">
+    <article class="kpi card">
+      <div class="kpi-label">Ganancias conocidas</div>
+      <div class="kpi-value">{{ money(r.knownGains) }}</div>
+      <div class="kpi-foot">Antes de compensar pérdidas</div>
+    </article>
+    <article class="kpi card">
+      <div class="kpi-label">Pérdidas conocidas</div>
+      <div class="kpi-value">{{ money(r.knownLosses) }}</div>
+      <div class="kpi-foot">Su imputación puede requerir revisión</div>
+    </article>
+    <article class="kpi card featured">
+      <div class="kpi-label">Cuota estimada del ahorro</div>
+      <div class="kpi-value">{{ money(r.settlement?.quota) }}</div>
+      <div class="kpi-foot">Con las rentas, reglas y supuestos aportados</div>
+    </article>
+    <article class="kpi card">
+      <div class="kpi-label">Tras retenciones confirmadas</div>
+      <div class="kpi-value">{{ money(r.balanceAfterWithholding) }}</div>
+      <div class="kpi-foot">
+        Saldo del ahorro; no es la liquidación completa de IRPF
+      </div>
+    </article>
+  </div>
+  <section class="card">
+    <div class="card-heading">
+      <div>
+        <h2>Ventas realizadas en {{ r.year }}</h2>
+        <p>
+          La retención de IRPF no reduce la ganancia fiscal. El coste incluye
+          gastos y tributos de adquisición; la venta resta su comisión.
+        </p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha y activo</th>
+            <th>Tipo fiscal</th>
+            <th class="numeric">Venta menos comisión</th>
+            <th class="numeric">Coste FIFO fiscal</th>
+            <th class="numeric">Ganancia/pérdida</th>
+            <th class="numeric">Resultado computable</th>
+            <th>Revisión</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (s of r.sales; track s.id) {
+            <tr>
+              <td>
+                {{ s.date }}<small>{{ s.name }} · {{ s.asset }}</small>
+              </td>
+              <td>
+                {{
+                  s.bucket === "income"
+                    ? "Rendimiento del capital"
+                    : s.bucket === "capital"
+                      ? "Ganancia patrimonial"
+                      : "Pendiente"
+                }}
+              </td>
+              <td class="numeric">{{ money(s.proceeds) }}</td>
+              <td class="numeric">{{ money(s.cost) }}</td>
+              <td class="numeric">{{ money(s.gain) }}</td>
+              <td class="numeric">{{ money(s.deductible) }}</td>
+              <td>
+                @if (reviewLoss(s)) {
+                  <label
+                    >Pérdida computable confirmada (€)<input
+                      type="number"
+                      min="0"
+                      [max]="-(s.gain || 0)"
+                      [(ngModel)]="settings.deductibleLosses[s.id]"
+                  /></label>
+                }
+                <small>{{
+                  s.reason || "Datos suficientes según los supuestos"
+                }}</small>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="7">
+                <div class="empty">
+                  No hay ventas registradas en este ejercicio.
+                </div>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    @if (r.sales.length) {
+      <div class="fiscal-content">
+        <button
+          class="button subtle"
+          (click)="saveSettings()"
+          [disabled]="busy()"
+        >
+          Guardar revisión de pérdidas
+        </button>
+      </div>
+    }
+  </section>
+  @if (r.settlement; as settlement) {
+    <section class="card fiscal-content">
+      <h2>Compensaciones y base del ahorro</h2>
+      <div class="stat-line">
+        <span>Base tras compensar</span
+        ><strong>{{ money(settlement.base) }}</strong>
+      </div>
+      <div class="stat-line">
+        <span>Compensación cruzada aplicada</span
+        ><strong>{{ money(settlement.crossOffset) }}</strong>
+      </div>
+      <div class="stat-line">
+        <span>Saldos anteriores utilizados</span
+        ><strong>{{ money(settlement.priorUsed) }}</strong>
+      </div>
+      <div class="stat-line">
+        <span>Efecto fiscal estimado de las transmisiones</span
+        ><strong>{{ money(r.salesTax) }}</strong>
+      </div>
+      @for (c of settlement.remaining; track c.year) {
+        <p class="muted">
+          Pendiente de {{ c.year }}: pérdidas {{ money(c.capital) }},
+          rendimientos negativos {{ money(c.income) }} · último ejercicio de
+          compensación {{ c.expires }}.
+        </p>
+      }
+    </section>
+  }
+  <section class="card">
+    <div class="card-heading">
+      <div>
+        <h2>Si vendes hoy cada posición · ejercicio {{ r.projectionYear }}</h2>
+        <p>
+          Simulaciones individuales de venta completa, con la comisión elegida y
+          los tramos del ejercicio actual. No sumes estas cuotas como si
+          vendieras todo a la vez.
+        </p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Activo</th>
+            <th class="numeric">Unidades</th>
+            <th class="numeric">Valor actual</th>
+            <th class="numeric">Coste fiscal restante</th>
+            <th class="numeric">Ganancia/pérdida prevista</th>
+            <th class="numeric">Impuesto adicional estimado</th>
+            <th class="numeric">Neto estimado de la venta</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (p of r.projections; track p.asset) {
+            <tr>
+              <td>
+                <strong>{{ p.name }}</strong
+                ><small>{{ p.asset }}</small>
+                @if (p.reason) {
+                  <small class="negative">{{ p.reason }}</small>
+                }
+              </td>
+              <td class="numeric">{{ number(p.quantity) }}</td>
+              <td class="numeric">{{ money(p.value) }}</td>
+              <td class="numeric">{{ money(p.cost) }}</td>
+              <td class="numeric">{{ money(p.gain) }}</td>
+              <td class="numeric">{{ money(p.additionalTax) }}</td>
+              <td class="numeric">{{ money(p.netAfterTax) }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="chart-note">
+      La simulación supone que no se producen recompras que impidan compensar
+      pérdidas. Una cuota adicional negativa es una reducción estimada de la
+      cuota del ahorro, no una devolución garantizada.
+    </p>
+    <div class="fiscal-content">
+      <strong
+        >Si liquidases todas las posiciones conjuntamente:
+        {{ money(r.liquidationTax) }} de impuesto adicional estimado.</strong
+      >
+    </div>
+  </section>
+  <div class="quality-panel">
+    <strong>Alcance del cálculo</strong>
+    <ul>
+      @for (w of r.warnings; track w) {
+        <li>{{ w }}</li>
+      }
+    </ul>
+    <div class="source-links">
+      @for (s of r.sources; track s.url) {
+        <a [href]="s.url" target="_blank" rel="noopener noreferrer"
+          >{{ s.title }} ↗</a
+        >
+      }
+    </div>
+  </div>
+}

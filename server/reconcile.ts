@@ -29,10 +29,13 @@ export function reconcile(store:Store,rows:Transaction[],source:'csv'|'api'):Rec
       if(candidates.length>1 || (candidates.length===1 && used.has(candidates[0].id))){result.conflicts.push({id:row.id,message:'Coincidencia CSV/API ambigua entre operaciones idénticas; requiere revisión.'});continue;}
       match=candidates[0];
     }
+    if(match&&source==='csv'&&((row.costBasis!==null&&match.costBasis!==null&&!new Decimal(row.costBasis).eq(match.costBasis))||(row.acquisitionDate&&match.acquisitionDate&&row.acquisitionDate!==match.acquisitionDate))){
+      result.conflicts.push({id:row.id,message:'El coste o la fecha original de adquisición difieren de los ya guardados. Revisa los lotes antes de sustituirlos.'});continue;
+    }
     if(match){
       used.add(match.id);result.matches.set(row.id,match.id);
       if(row.id!==match.id)result.links.push({alias:row.id,canonical:match.id});
-      if(source==='csv' && (enrich||row.costBasis!==null&&match.costBasis===null))result.updates.push({...match,amount:enrich?row.amount:match.amount,costBasis:row.costBasis??match.costBasis});
+      if(source==='csv' && (enrich||row.costBasis!==null&&match.costBasis===null||row.acquisitionDate&&!match.acquisitionDate))result.updates.push({...match,amount:enrich?row.amount:match.amount,costBasis:row.costBasis??match.costBasis,...(row.acquisitionDate?{acquisitionDate:row.acquisitionDate}:{})});
     }else{result.rows.push(row);existing.set(row.id,row);origins.set(row.id,source);}
   }
   return result;

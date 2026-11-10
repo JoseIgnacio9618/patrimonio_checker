@@ -77,7 +77,7 @@ test('button sync returns a background job and status endpoints expose its resul
   const runs=await api.get('/api/connection/runs').expect(200);assert.equal(runs.body[0].status,'success');
   const config=await api.post('/api/connection/config').set('X-Patrimonio','local').send({enabled:true,intervalMinutes:15}).expect(200);assert.equal(config.body.intervalMinutes,15);assert.ok(config.body.nextRun);
   await api.post('/api/connection/config').set('X-Patrimonio','local').send({enabled:true,intervalMinutes:0}).expect(400);
-  const backup=await api.get('/api/export/backup').expect(200);assert.equal(backup.body.version,2);assert.equal(backup.body.brokerSnapshots.length,1);assert.ok(!JSON.stringify(backup.body).includes('sensitive-session'));
+  const backup=await api.get('/api/export/backup').expect(200);assert.equal(backup.body.version,3);assert.equal(backup.body.brokerSnapshots.length,1);assert.ok(!JSON.stringify(backup.body).includes('sensitive-session'));
   const second=setup();t.after(()=>second.store.close());await second.api.post('/api/restore').set('X-Patrimonio','local').send(backup.body).expect(200);assert.deepEqual(second.store.snapshot(),store.snapshot());
 });
 

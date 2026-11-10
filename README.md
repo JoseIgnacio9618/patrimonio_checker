@@ -28,6 +28,8 @@ Abre http://127.0.0.1:4200. El frontend redirige `/api` al backend local en el p
 
 ## Qué incluye
 
+- Selector **Claro / Oscuro / Sistema**, con preferencia guardada y verde gasolina como color principal.
+- Fiscalidad española por ejercicio: prompt para investigar normativa, importación/revisión de reglas JSON, ventas realizadas y simulación por activo.
 - Vista general con evolución diaria, patrimonio, aportaciones netas y resultado.
 - Posiciones, coste FIFO, beneficio realizado y latente, pesos y efectivo reconstruido.
 - Movimientos con búsqueda, filtros de tipo y fecha, y paginación.
@@ -71,6 +73,7 @@ Consulta [public/plantilla-movimientos.csv](public/plantilla-movimientos.csv). *
 | `fee`, `tax` | Costes positivos de ese movimiento, nunca negativos. |
 | `currency` | `EUR`. Sin columna se asume EUR y se avisa. |
 | `costBasis` | Coste original **total** de un traspaso de entrada, no precio unitario. Vacío si se desconoce. |
+| `acquisitionDate` | Fecha original de compra de un lote transferido; requerida junto con su coste para el cálculo fiscal. |
 | `note` | Nota opcional. |
 
 Tipos: `DEPOSIT`, `WITHDRAWAL`, `BUY`, `SELL`, `DIVIDEND`, `INTEREST`, `CARD_PAYMENT`, `CARD_REFUND`, `SAVEBACK`, `FEE`, `TAX`, `TAX_REFUND`, `TRANSFER_IN`, `TRANSFER_OUT`. Los movimientos genéricos de transferencia deben clasificarse: dinero propio (`DEPOSIT` / `WITHDRAWAL`) y traspasos de valores (`TRANSFER_IN` / `TRANSFER_OUT`) tienen efectos diferentes.
@@ -81,7 +84,7 @@ Solo EUR: convierte otras divisas con tipos documentados antes de importar. No h
 
 ### Bitcoin transferido desde Binance
 
-Para `TRANSFER_IN`, `quantity` indica los BTC recibidos; `amount`, su valor de mercado en EUR ese día; y `costBasis`, el coste original total en Binance. Si `amount` es cero, se intenta usar una cotización importada de esa fecha o de los últimos 7 días. Si no existe, se ocultan las aportaciones y rentabilidades afectadas.
+Para `TRANSFER_IN`, `quantity` indica los BTC recibidos; `amount`, su valor de mercado en EUR ese día; y `costBasis`, el coste original total en Binance. Añade `acquisitionDate` con la fecha original de cada lote para aplicar FIFO fiscal. Si `amount` es cero, se intenta usar una cotización importada de esa fecha o de los últimos 7 días. Si no existe, se ocultan las aportaciones y rentabilidades afectadas.
 
 Si falta `costBasis`, la app no inventa un coste cero. La ganancia FIFO y el resultado latente afectados aparecen como desconocidos. El rendimiento económico desde que entraron en esta cartera puede calcularse si se conoce su valor de entrada, aunque su ganancia desde la adquisición original siga sin conocerse.
 
@@ -98,13 +101,21 @@ Los símbolos con prefijo `BENCH:`, por ejemplo `BENCH:SP500`, `BENCH:MSCI_WORLD
 - Efectivo: depósitos y cobros menos compras, retiradas, pagos y costes. No se sustituye por el saldo del conector.
 - Aportaciones netas: depósitos menos retiradas y gasto neto con tarjeta, más valor de mercado neto de traspasos de activos. Un reembolso de tarjeta revierte el gasto; intereses, dividendos y Saveback son rendimiento.
 - Resultado: patrimonio valorado menos aportaciones netas. Incluye ingresos y costes del periodo. No presupone que las retiradas sean una pérdida de inversión.
-- FIFO: consume los lotes antiguos y prorratea su coste, con `decimal.js` de 40 dígitos de precisión. Los datos se guardan como cadenas decimales y las cifras monetarias se redondean a dos decimales al presentar. Las ventas netean sus comisiones e impuestos registrados; no se calculan nuevos impuestos ni reglas fiscales por país.
+- FIFO: consume los lotes antiguos y prorratea su coste, con `decimal.js` de 40 dígitos de precisión. Los datos se guardan como cadenas decimales y las cifras monetarias se redondean a dos decimales al presentar. Las ventas netean sus comisiones e impuestos registrados; este resultado económico es distinto de la estimación fiscal separada.
 - TWR **aproximado**: encadena `(valor final − flujo externo) / valor anterior − 1`; la primera financiación se considera al inicio del día. No reconstruye cotizaciones o flujos intradía. Falta de precios o historial inválido oculta esta métrica.
 - XIRR: usa importes y fechas de los flujos externos y el patrimonio final, con año de 365 días. Se exige un único cambio de signo de forma conservadora; no se elige arbitrariamente una de varias raíces. Sin horizonte temporal, raíz admisible o valoración final no se muestra.
 - Riesgo: volatilidad y Sharpe requieren al menos 30 rendimientos diarios. Usan desviación muestral y factor `√365`, días naturales, y tipo libre de riesgo cero. Los precios arrastrados pueden suavizar la volatilidad. Drawdown se calcula sobre TWR, evitando que las aportaciones oculten caídas. HHI incluye efectivo.
 - Las proyecciones usan capitalización mensual, aportaciones a fin de mes e inflación constante; no incluyen fiscalidad ni comisiones futuras.
 
 No es un programa de presentación de impuestos. Los lotes transferidos fuera, por ejemplo, no generan una venta en esta cartera; para conocer el resultado fiscal global necesitas el historial completo de todas tus cuentas.
+
+## Fiscalidad anual y modo de color
+
+En **Fiscalidad**, elige el ejercicio, copia el prompt para una IA que consulte BOE/AEAT, importa su fichero JSON y revisa los tramos y las fuentes antes de activar ese año. La app te pide residencia/régimen, historial completo y los demás datos personales necesarios. Cada ejercicio conserva sus reglas y datos; no se reutilizan automáticamente los tipos de otro año. Consulta [docs/FISCALIDAD.md](docs/FISCALIDAD.md) para el flujo completo y sus límites.
+
+Muestra las ventas realizadas, cuota estimada de la parte del ahorro, compensaciones y simulaciones de venta por activo. No es una liquidación completa del IRPF. Sin normativa o costes suficientes deja la cuota pendiente. Las simulaciones de venta actual también aparecen en **Mi cartera**.
+
+El selector **Tema** de la barra superior ofrece **Claro**, **Oscuro** y **Sistema**. Conserva la elección en el navegador y adapta gráficos, formularios, tablas y avisos; Sistema sigue los cambios de apariencia del equipo.
 
 ## Actualización con Trade Republic y jobs
 
@@ -162,7 +173,7 @@ Para usar cron, systemd o el Programador de tareas de Windows, programa el terce
 - No expongas el servidor a Internet. No incorpora autenticación multiusuario; otro proceso de tu usuario local puede acceder. Para hosting harían falta autenticación, aislamiento y otro modelo de secretos y almacenamiento.
 - `.gitignore` excluye datos, claves, `.env`, dependencias y builds. Ningún dato bancario real está incluido.
 
-**Mis datos → Descargar copia completa** exporta un JSON de versión 2 con movimientos, precios, fotografías del broker y alias/origen de conciliación; no incluye sesión, clave, configuración del job, actividad del conector ni historial de importaciones/ejecuciones. Se aceptan también copias de versión 1. Restaura en una base vacía, con validación atómica. Para un respaldo de toda la instalación, detén el servidor antes de copiar la carpeta `data/` y guarda esa copia de forma privada. El CSV exportado está protegido frente a fórmulas de hojas de cálculo; usa JSON para restaurar IDs y orden exactamente.
+**Mis datos → Descargar copia completa** exporta un JSON de versión 3 con movimientos, precios, fotografías del broker, alias/origen de conciliación y datos/perfiles fiscales con todas sus versiones; no incluye sesión, clave, configuración del job, actividad del conector ni historial de importaciones/ejecuciones. Se aceptan también copias de versiones 1 y 2. Restaura en una base vacía, con validación atómica. Para un respaldo de toda la instalación, detén el servidor antes de copiar la carpeta `data/` y guarda esa copia de forma privada. El CSV exportado está protegido frente a fórmulas de hojas de cálculo; usa JSON para restaurar IDs y orden exactamente.
 
 ## Pruebas y estructura
 

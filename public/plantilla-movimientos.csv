@@ -1,5 +1,5 @@
-id;date;type;asset;name;category;quantity;amount;fee;tax;currency;costBasis;note
-ejemplo-1;2026-01-02;DEPOSIT;;Aportación inicial;OTHER;0;1000;0;0;EUR;;Ejemplo ficticio: reemplaza todas las filas
-ejemplo-2;2026-01-03;BUY;IE00EJEMPLO1;ETF de ejemplo;ETF;2;200;1;0;EUR;;Importe bruto sin comisión
-ejemplo-3;2026-01-10;INTEREST;;Intereses;OTHER;0;2,50;0;0,48;EUR;;Interés bruto y retención separada
-ejemplo-4;2026-01-12;TRANSFER_IN;BTC;Bitcoin;CRYPTO;0,001;80;0;0;EUR;50;Valor de entrada 80 EUR y coste original total 50 EUR
+id;date;type;asset;name;category;quantity;amount;fee;tax;currency;costBasis;note;acquisitionDate
+ejemplo-1;2026-01-02;DEPOSIT;;Aportación inicial;OTHER;0;1000;0;0;EUR;;Ejemplo ficticio: reemplaza todas las filas;
+ejemplo-2;2026-01-03;BUY;IE00EJEMPLO1;ETF de ejemplo;ETF;2;200;1;0;EUR;;Importe bruto sin comisión;
+ejemplo-3;2026-01-10;INTEREST;;Intereses;OTHER;0;2,50;0;0,48;EUR;;Interés bruto y retención separada;
+ejemplo-4;2026-01-12;TRANSFER_IN;BTC;Bitcoin;CRYPTO;0,001;80;0;0;EUR;50;Valor de entrada 80 EUR y coste original total 50 EUR;2025-05-01

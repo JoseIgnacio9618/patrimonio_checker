@@ -17,6 +17,7 @@ const aliases: Record<string, string[]> = {
   tax: ['tax', 'taxes', 'impuesto', 'impuestos', 'steuer'],
   currency: ['currency', 'divisa', 'moneda', 'wahrung'],
   costBasis: ['cost basis', 'costbasis', 'coste original', 'coste de adquisicion'],
+  acquisitionDate: ['acquisitionDate','acquisition date','fecha original','fecha de adquisicion original'],
   note: ['note', 'nota', 'notes', 'concepto']
 };
 const typeMap: Record<string, TransactionType> = {};
@@ -120,6 +121,7 @@ export function previewCsv(csv: string, existing: Transaction[] = [], supplied?:
       if (['BUY', 'SELL', 'TRANSFER_IN', 'TRANSFER_OUT'].includes(type) && (!tx.asset || !new Decimal(tx.quantity).gt(0))) throw new Error('La operación requiere activo y cantidad mayor que cero');
       if (!['BUY', 'SELL', 'TRANSFER_IN', 'TRANSFER_OUT'].includes(type) && new Decimal(tx.quantity).gt(0)) throw new Error('Solo compras, ventas y traspasos pueden mover unidades');
       if (type !== 'TRANSFER_IN' && tx.costBasis !== null) throw new Error('Coste original solo se admite en traspasos de entrada');
+      if(get('acquisitionDate')){tx.acquisitionDate=dateString(get('acquisitionDate'));if(type!=='TRANSFER_IN'||tx.acquisitionDate>tx.date)throw new Error('La fecha original solo corresponde a un traspaso de entrada y no puede ser posterior al traspaso');}
       if (tx.asset.length > 80 || tx.name.length > 200 || tx.note.length > 500 || get('id').length > 200) throw new Error('Un campo supera la longitud máxima');
       const hash = fingerprint(tx);
       const occurrence = (occurrences.get(hash) ?? 0) + 1;

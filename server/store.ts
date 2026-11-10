@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BrokerSnapshot, Price, SyncRun, Transaction } from '../shared/types.js';
+import type { AnnualTaxRules } from '../shared/tax.js';
 
 export class Store {
   db: DatabaseSync;
@@ -21,6 +22,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS sync_runs(id TEXT PRIMARY KEY,started_at TEXT NOT NULL,json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS broker_snapshots(id TEXT PRIMARY KEY,at TEXT NOT NULL,json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS job_locks(name TEXT PRIMARY KEY,owner TEXT NOT NULL,expires INTEGER NOT NULL);`);
+    this.db.exec('CREATE TABLE IF NOT EXISTS tax_rule_versions(hash TEXT PRIMARY KEY,year INTEGER NOT NULL,activated_at TEXT NOT NULL,json TEXT NOT NULL)');
   }
   transactions(): Transaction[] { return (this.db.prepare('SELECT json FROM transactions ORDER BY date, rowid').all() as {json:string}[]).map(r => JSON.parse(r.json)); }
   prices(): Price[] { return this.db.prepare('SELECT asset,date,price FROM prices ORDER BY date').all() as unknown as Price[]; }
@@ -41,8 +43,12 @@ export class Store {
   snapshotHistory():{at:string;value:number|null}[]{return (this.db.prepare("SELECT at,json_extract(json,'$.totalValue') AS value FROM broker_snapshots ORDER BY at DESC,rowid DESC LIMIT 1000").all() as unknown as {at:string;value:number|null}[]).reverse();}
   runs():SyncRun[] {return (this.db.prepare('SELECT json FROM sync_runs ORDER BY started_at DESC,rowid DESC LIMIT 30').all() as {json:string}[]).map(r=>JSON.parse(r.json));}
   saveRun(run:SyncRun){this.db.prepare('INSERT INTO sync_runs(id,started_at,json) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json').run(run.id,run.startedAt,JSON.stringify(run));}
-  backup() { return { version: 2, exportedAt: new Date().toISOString(), transactions: this.transactions(), prices: this.prices(),
+  taxRules():Record<string,AnnualTaxRules>{const all=this.db.prepare('SELECT year,hash,json FROM tax_rule_versions ORDER BY activated_at,rowid').all() as {year:number;hash:string;json:string}[];const result:Record<string,AnnualTaxRules>={};for(const row of all)if(this.setting(`taxRules:${row.year}`,null)===row.hash)result[String(row.year)]=JSON.parse(row.json);return result;}
+  backup() { return { version: 3, exportedAt: new Date().toISOString(), transactions: this.transactions(), prices: this.prices(),
     origins:this.db.prepare('SELECT id,source FROM transactions').all(),aliases:this.db.prepare('SELECT alias,canonical FROM transaction_aliases').all(),
+    taxConfig:this.setting('taxConfig',undefined),
+    taxVersions:(this.db.prepare('SELECT json,activated_at FROM tax_rule_versions ORDER BY activated_at,rowid').all() as {json:string;activated_at:string}[]).map(r=>({rules:JSON.parse(r.json),activatedAt:r.activated_at})),
+    taxActive:Object.fromEntries(Object.keys(this.taxRules()).map(year=>[year,this.setting(`taxRules:${year}`,null)])),
     brokerSnapshots:(this.db.prepare('SELECT json FROM broker_snapshots ORDER BY at').all() as {json:string}[]).map(r=>JSON.parse(r.json)) }; }
   close() { this.db.close(); }
 }

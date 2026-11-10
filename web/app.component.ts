@@ -1,17 +1,21 @@
-import { Component, computed, signal, OnDestroy } from '@angular/core';
+import { Component, computed, signal, OnDestroy, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ChartComponent } from './chart.component';
 import type { ConnectionState, Dashboard, ImportPreview, Mapping, SyncRun, Transaction } from '../shared/types';
 import { transactionTypes } from '../shared/types';
 import type { EChartsCoreOption } from 'echarts/core';
+import { TaxComponent } from './tax.component';
+import type { TaxReport } from '../shared/tax';
+import { ThemeService } from './theme.service';
 
 const euro = new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:2});
 const percent = new Intl.NumberFormat('es-ES',{style:'percent',maximumFractionDigits:2});
-const palette=['#17634e','#8ab994','#c5a35c','#728ab6','#ad94ba','#a3aaa5'];
-type View='overview'|'positions'|'transactions'|'income'|'analytics'|'projections'|'imports'|'connections'|'settings';
+type View='overview'|'positions'|'transactions'|'income'|'analytics'|'projections'|'tax'|'imports'|'connections'|'settings';
 
-@Component({selector:'app-root',standalone:true,imports:[FormsModule,ChartComponent],templateUrl:'./app.component.html'})
+@Component({selector:'app-root',standalone:true,imports:[FormsModule,ChartComponent,TaxComponent],templateUrl:'./app.component.html'})
 export class AppComponent implements OnDestroy {
+  readonly theme=inject(ThemeService);
+  readonly palette=computed(()=>this.theme.colors().palette);
   view=signal<View>('overview');
   demo=signal(false);
   data=signal<Dashboard|null>(null);
@@ -32,6 +36,7 @@ export class AppComponent implements OnDestroy {
   connection=signal<ConnectionState|null>(null);
   inbox=signal<{id:string;timestamp:string;title:string;eventType:string;status:string;outcome:string;reason:string;amount:{value:number;currency:string}}[]>([]);
   runs=signal<SyncRun[]>([]);
+  positionTax=signal<TaxReport|null>(null);
   portfolioSource=signal<'broker'|'ledger'>('broker');
   intervalMinutes=360; syncEnabled=false;
   tickerRules:{asset:string;id:string;currency:string;divisor:number}[]=[];
@@ -39,10 +44,10 @@ export class AppComponent implements OnDestroy {
   private refreshTimer:ReturnType<typeof setInterval>;
   monthlyContribution=300; annualReturn=5; inflation=2;
   transactionTypes=transactionTypes;
-  mappingFields:{key:keyof Mapping;label:string}[]=[{key:'date',label:'Fecha *'},{key:'type',label:'Tipo *'},{key:'amount',label:'Importe bruto *'},{key:'id',label:'ID de operación'},{key:'asset',label:'ISIN / símbolo'},{key:'name',label:'Nombre'},{key:'category',label:'Categoría'},{key:'quantity',label:'Unidades'},{key:'fee',label:'Comisiones'},{key:'tax',label:'Impuestos'},{key:'currency',label:'Divisa'},{key:'costBasis',label:'Coste original total'},{key:'note',label:'Nota'}];
-  nav:{view:View;label:string;icon:string}[]=[{view:'overview',label:'Vista general',icon:'◫'},{view:'positions',label:'Mi cartera',icon:'▥'},{view:'transactions',label:'Movimientos',icon:'⇄'},{view:'income',label:'Ingresos pasivos',icon:'↗'},{view:'analytics',label:'Análisis y riesgo',icon:'◎'},{view:'projections',label:'Proyecciones',icon:'⌁'}];
-  titles:Record<View,string>={overview:'Tu progreso, con perspectiva.',positions:'Cada activo, en detalle.',transactions:'La historia de tu dinero.',income:'Tu dinero también trabaja.',analytics:'Entiende lo que hay detrás.',projections:'Dale tiempo a tu futuro.',imports:'Todo empieza con tus datos.',connections:'Tus cuentas, conectadas.',settings:'Tus datos son tuyos.'};
-  subtitles:Record<View,string>={overview:'Patrimonio, aportaciones y resultados en un solo lugar.',positions:'Posiciones reconstruidas a partir de tu historial de operaciones.',transactions:'Busca y revisa tus operaciones sin perder el contexto.',income:'Dividendos, intereses y Saveback a lo largo del tiempo.',analytics:'Rentabilidad, diversificación y una visión más amplia del riesgo.',projections:'Explora escenarios de ahorro e inversión, sin promesas.',imports:'Importa históricos completos o actualizaciones sin duplicar movimientos.',connections:'Sincronización experimental y control de la última actualización.',settings:'Exporta tus movimientos o guarda una copia completa de tu cartera.'};
+  mappingFields:{key:keyof Mapping;label:string}[]=[{key:'date',label:'Fecha *'},{key:'type',label:'Tipo *'},{key:'amount',label:'Importe bruto *'},{key:'id',label:'ID de operación'},{key:'asset',label:'ISIN / símbolo'},{key:'name',label:'Nombre'},{key:'category',label:'Categoría'},{key:'quantity',label:'Unidades'},{key:'fee',label:'Comisiones'},{key:'tax',label:'Impuestos'},{key:'currency',label:'Divisa'},{key:'costBasis',label:'Coste original total'},{key:'acquisitionDate',label:'Fecha original de adquisición'},{key:'note',label:'Nota'}];
+  nav:{view:View;label:string;icon:string}[]=[{view:'overview',label:'Vista general',icon:'◫'},{view:'positions',label:'Mi cartera',icon:'▥'},{view:'transactions',label:'Movimientos',icon:'⇄'},{view:'income',label:'Ingresos pasivos',icon:'↗'},{view:'analytics',label:'Análisis y riesgo',icon:'◎'},{view:'projections',label:'Proyecciones',icon:'⌁'},{view:'tax',label:'Fiscalidad',icon:'€'}];
+  titles:Record<View,string>={overview:'Tu progreso, con perspectiva.',positions:'Cada activo, en detalle.',transactions:'La historia de tu dinero.',income:'Tu dinero también trabaja.',analytics:'Entiende lo que hay detrás.',projections:'Dale tiempo a tu futuro.',tax:'Tus inversiones, con previsión fiscal.',imports:'Todo empieza con tus datos.',connections:'Tus cuentas, conectadas.',settings:'Tus datos son tuyos.'};
+  subtitles:Record<View,string>={overview:'Patrimonio, aportaciones y resultados en un solo lugar.',positions:'Posiciones reconstruidas a partir de tu historial de operaciones.',transactions:'Busca y revisa tus operaciones sin perder el contexto.',income:'Dividendos, intereses y Saveback a lo largo del tiempo.',analytics:'Rentabilidad, diversificación y una visión más amplia del riesgo.',projections:'Explora escenarios de ahorro e inversión, sin promesas.',tax:'Normativa por ejercicio, ventas realizadas y simulación de impuestos por activo.',imports:'Importa históricos completos o actualizaciones sin duplicar movimientos.',connections:'Sincronización experimental y control de la última actualización.',settings:'Exporta tus movimientos o guarda una copia completa de tu cartera.'};
   constructor(){void this.reload();this.refreshTimer=setInterval(()=>void this.refreshBackground(),15000);}
   ngOnDestroy(){this.destroyed=true;clearInterval(this.refreshTimer);}
   private async refreshBackground(){
@@ -65,7 +70,7 @@ export class AppComponent implements OnDestroy {
   }
   async run(fn:()=>Promise<void>){this.busy.set(true);this.error.set('');this.notice.set('');try{await fn();}catch(e){this.error.set((e as Error).message);}finally{this.busy.set(false);}}
   async reload(){await this.run(async()=>{this.data.set(await this.api<Dashboard>('dashboard'));});}
-  async navigate(view:View){this.view.set(view);this.error.set('');this.notice.set('');if(view==='transactions')await this.loadTransactions(1);if(view==='imports')await this.loadImports();if(view==='connections')await this.loadConnection();}
+  async navigate(view:View){this.view.set(view);this.error.set('');this.notice.set('');if(view==='positions'){this.positionTax.set(null);await this.run(async()=>{this.positionTax.set(await this.api<TaxReport>(`tax?year=${new Date().getFullYear()}`));});}if(view==='transactions')await this.loadTransactions(1);if(view==='imports')await this.loadImports();if(view==='connections')await this.loadConnection();}
   async toggleDemo(){if(this.busy())return;this.demo.update(d=>!d);this.preview.set(null);this.csv='';this.filename='';this.priceCsv='';await this.reload();await this.navigate(this.view());}
   async loadTransactions(page=1){await this.run(async()=>{const q=new URLSearchParams({q:this.query,type:this.filterType,from:this.from,to:this.to,page:String(page)});const result=await this.api<{rows:Transaction[];total:number}>(`transactions?${q}`);this.transactions.set(result.rows);this.transactionTotal.set(result.total);this.page.set(page);});}
   async loadImports(){await this.run(async()=>{this.imports.set(await this.api('imports'));});}
@@ -122,28 +127,28 @@ export class AppComponent implements OnDestroy {
   });
   readonly wealthChart=computed<EChartsCoreOption>(()=>{
     const points=this.filteredHistory();return this.lineOption(points.map(p=>p.date),[
-      {name:'Patrimonio',data:points.map(p=>p.value),type:'line',showSymbol:false,smooth:0.15,lineStyle:{width:3},itemStyle:{color:palette[0]},areaStyle:{color:'#e7f1e6',opacity:0.65}},
-      {name:'Aportaciones netas',data:points.map(p=>p.contributions),type:'line',showSymbol:false,lineStyle:{type:'dashed',width:1.5},itemStyle:{color:'#a5afa7'}}
+      {name:'Patrimonio',data:points.map(p=>p.value),type:'line',showSymbol:false,smooth:0.15,lineStyle:{width:3},itemStyle:{color:this.palette()[0]},areaStyle:{color:this.theme.colors().area,opacity:0.65}},
+      {name:'Aportaciones netas',data:points.map(p=>p.contributions),type:'line',showSymbol:false,lineStyle:{type:'dashed',width:1.5},itemStyle:{color:this.theme.colors().muted}}
     ]);
   });
-  readonly brokerChart=computed<EChartsCoreOption>(()=>{const h=this.data()?.brokerHistory??[];return this.lineOption(h.map(p=>p.at),[{name:'Patrimonio comunicado',type:'line',showSymbol:h.length<10,data:h.map(p=>p.value),itemStyle:{color:palette[0]},lineStyle:{width:3}}]);});
+  readonly brokerChart=computed<EChartsCoreOption>(()=>{const h=this.data()?.brokerHistory??[];return this.lineOption(h.map(p=>p.at),[{name:'Patrimonio comunicado',type:'line',showSymbol:h.length<10,data:h.map(p=>p.value),itemStyle:{color:this.palette()[0]},lineStyle:{width:3}}]);});
   readonly allocation=computed(()=>{
     const d=this.data();if(!d||d.value===null||d.value<=0)return[];
     const sums=new Map<string,number>();for(const p of d.positions)sums.set(this.categoryLabel(p.category),(sums.get(this.categoryLabel(p.category))??0)+(p.value??0));if(d.cash>0)sums.set('Efectivo',d.cash);
-    return [...sums].map(([name,value],i)=>({name,value,color:palette[i%palette.length]}));
+    return [...sums].map(([name,value],i)=>({name,value,color:this.palette()[i%this.palette().length]}));
   });
-  readonly allocationChart=computed<EChartsCoreOption>(()=>({color:this.allocation().map(a=>a.color),tooltip:{trigger:'item',renderMode:'richText',formatter:'{b}\n{c} € · {d}%'},series:[{type:'pie',radius:['65%','86%'],center:['50%','50%'],label:{show:false},itemStyle:{borderRadius:3,borderWidth:4,borderColor:'#fff'},data:this.allocation().map(({name,value})=>({name,value}))}]}));
-  readonly incomeChart=computed<EChartsCoreOption>(()=>{const months=this.data()?.monthly??[];return this.lineOption(months.map(m=>m.month),[{name:'Ingresos netos',type:'bar',data:months.map(m=>m.income),itemStyle:{color:palette[0],borderRadius:[5,5,0,0]},barMaxWidth:32}]);});
-  readonly monthlyChart=computed<EChartsCoreOption>(()=>{const months=this.data()?.monthly??[];return this.lineOption(months.map(m=>m.month),[{name:'Aportaciones netas',type:'bar',data:months.map(m=>m.contributions),itemStyle:{color:palette[1],borderRadius:[3,3,0,0]},barMaxWidth:22},{name:'Resultado',type:'bar',data:months.map(m=>m.profit),itemStyle:{color:palette[0],borderRadius:[3,3,0,0]},barMaxWidth:22}]);});
+  readonly allocationChart=computed<EChartsCoreOption>(()=>({color:this.allocation().map(a=>a.color),tooltip:{trigger:'item',renderMode:'richText',formatter:'{b}\n{c} € · {d}%'},series:[{type:'pie',radius:['65%','86%'],center:['50%','50%'],label:{show:false},itemStyle:{borderRadius:3,borderWidth:4,borderColor:this.theme.colors().surface},data:this.allocation().map(({name,value})=>({name,value}))}]}));
+  readonly incomeChart=computed<EChartsCoreOption>(()=>{const months=this.data()?.monthly??[];return this.lineOption(months.map(m=>m.month),[{name:'Ingresos netos',type:'bar',data:months.map(m=>m.income),itemStyle:{color:this.palette()[0],borderRadius:[5,5,0,0]},barMaxWidth:32}]);});
+  readonly monthlyChart=computed<EChartsCoreOption>(()=>{const months=this.data()?.monthly??[];return this.lineOption(months.map(m=>m.month),[{name:'Aportaciones netas',type:'bar',data:months.map(m=>m.contributions),itemStyle:{color:this.palette()[1],borderRadius:[3,3,0,0]},barMaxWidth:22},{name:'Resultado',type:'bar',data:months.map(m=>m.profit),itemStyle:{color:this.palette()[0],borderRadius:[3,3,0,0]},barMaxWidth:22}]);});
   readonly benchmarkChart=computed<EChartsCoreOption>(()=>{
     const d=this.data();if(!d)return{};const points=this.filteredHistory();const first=points.find(p=>p.twrIndex!==null)?.twrIndex;
-    const series:Record<string,unknown>[]=[{name:'Mi cartera · TWR',type:'line',showSymbol:false,data:points.map(p=>p.twrIndex!==null&&first?p.twrIndex/first*100:null),itemStyle:{color:palette[0]},lineStyle:{width:3}}];
-    d.benchmarks.forEach((b,i)=>{const selected=b.points.filter(p=>p.date>=(points[0]?.date??''));const initial=selected[0]?.value;const map=new Map(selected.map(p=>[p.date,initial?p.value/initial*100:null]));series.push({name:b.asset.replace('BENCH:','').replaceAll('_',' '),type:'line',showSymbol:false,connectNulls:false,data:points.map(p=>map.get(p.date)??null),itemStyle:{color:palette[(i+1)%palette.length]},lineStyle:{width:1.5,type:'dashed'}});});
+    const series:Record<string,unknown>[]=[{name:'Mi cartera · TWR',type:'line',showSymbol:false,data:points.map(p=>p.twrIndex!==null&&first?p.twrIndex/first*100:null),itemStyle:{color:this.palette()[0]},lineStyle:{width:3}}];
+    d.benchmarks.forEach((b,i)=>{const selected=b.points.filter(p=>p.date>=(points[0]?.date??''));const initial=selected[0]?.value;const map=new Map(selected.map(p=>[p.date,initial?p.value/initial*100:null]));series.push({name:b.asset.replace('BENCH:','').replaceAll('_',' '),type:'line',showSymbol:false,connectNulls:false,data:points.map(p=>map.get(p.date)??null),itemStyle:{color:this.palette()[(i+1)%this.palette().length]},lineStyle:{width:1.5,type:'dashed'}});});
     return this.lineOption(points.map(p=>p.date),series,false);
   });
-  lineOption(dates:string[],series:unknown[],isMoney=true):EChartsCoreOption{return{tooltip:{trigger:'axis',renderMode:'richText'},legend:{bottom:0,left:12,itemWidth:12,itemHeight:7,textStyle:{color:'#6c776f',fontSize:11}},grid:{left:65,right:18,top:25,bottom:55},xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{show:false},axisTick:{show:false},axisLabel:{color:'#87928b',fontSize:10,formatter:(s:string)=>s.length===7?s.slice(5):s.slice(5)}},yAxis:{type:'value',scale:true,splitNumber:4,axisLabel:{color:'#87928b',fontSize:10,formatter:(v:number)=>isMoney?(Math.abs(v)>=1000?`${this.num(v/1000,1)} mil`:this.num(v,0)):this.num(v,0)},splitLine:{lineStyle:{color:'#eef1eb',type:'dashed'}}},series};}
+  lineOption(dates:string[],series:unknown[],isMoney=true):EChartsCoreOption{return{tooltip:{trigger:'axis',renderMode:'richText'},legend:{bottom:0,left:12,itemWidth:12,itemHeight:7,textStyle:{color:this.theme.colors().muted,fontSize:11}},grid:{left:65,right:18,top:25,bottom:55},xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{show:false},axisTick:{show:false},axisLabel:{color:this.theme.colors().muted,fontSize:10,formatter:(s:string)=>s.length===7?s.slice(5):s.slice(5)}},yAxis:{type:'value',scale:true,splitNumber:4,axisLabel:{color:this.theme.colors().muted,fontSize:10,formatter:(v:number)=>isMoney?(Math.abs(v)>=1000?`${this.num(v/1000,1)} mil`:this.num(v,0)):this.num(v,0)},splitLine:{lineStyle:{color:this.theme.colors().line,type:'dashed'}}},series};}
   projection(years:number,annual=this.annualReturn){const initial=this.data()?.value??0,rate=Math.expm1(Math.log1p(annual/100)/12),months=years*12;return initial*(1+rate)**months+this.monthlyContribution*(Math.abs(rate)<1e-12?months:((1+rate)**months-1)/rate);}
   invested(years:number){return(this.data()?.value??0)+this.monthlyContribution*years*12;}
   realProjection(years:number){return this.projection(years)/(1+this.inflation/100)**years;}
-  get projectionOption():EChartsCoreOption{const years=Array.from({length:21},(_,i)=>i);return this.lineOption(years.map(y=>`${y} años`),[{name:'Escenario elegido',type:'line',showSymbol:false,data:years.map(y=>this.projection(y)),itemStyle:{color:palette[0]},areaStyle:{color:'#e7f1e6',opacity:0.7}},{name:'Capital aportado',type:'line',showSymbol:false,data:years.map(y=>this.invested(y)),itemStyle:{color:'#a5afa7'},lineStyle:{type:'dashed'}}]);}
+  get projectionOption():EChartsCoreOption{const years=Array.from({length:21},(_,i)=>i);return this.lineOption(years.map(y=>`${y} años`),[{name:'Escenario elegido',type:'line',showSymbol:false,data:years.map(y=>this.projection(y)),itemStyle:{color:this.palette()[0]},areaStyle:{color:this.theme.colors().area,opacity:0.7}},{name:'Capital aportado',type:'line',showSymbol:false,data:years.map(y=>this.invested(y)),itemStyle:{color:this.theme.colors().muted},lineStyle:{type:'dashed'}}]);}
 }
