@@ -16,6 +16,8 @@ try{
   ]);
   const health=await fetch('http://127.0.0.1:3000/api/health');assert.equal(health.status,200);assert.equal((await health.json()).status,'ok');
   const index=await fetch('http://127.0.0.1:3000/');assert.equal(index.status,200);const html=await index.text();assert.match(html,/<app-root>/);
+  assert.doesNotMatch(html,/media="print"|data-beasties-media/,'Production styles must load without an inline script blocked by CSP');
+  assert.doesNotMatch(html,/<script(?![^>]*\bsrc=)[^>]*>\s*\S/,'Production entry must not need inline scripts');
   const bundle=html.match(/src="(main-[^"]+\.js)"/);assert.ok(bundle);const js=await fetch(`http://127.0.0.1:3000/${bundle[1]}`);assert.equal(js.status,200);assert.match(js.headers.get('content-type'),/javascript/);
   const dashboard=await (await fetch('http://127.0.0.1:3000/api/dashboard')).json();assert.equal(dashboard.transactionCount,0);
   const demo=await (await fetch('http://127.0.0.1:3000/api/dashboard?demo=1')).json();assert.ok(demo.value>0);

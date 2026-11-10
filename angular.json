@@ -20,6 +20,11 @@
           },
           "configurations": {
             "production": {
+              "optimization": {
+                "scripts": true,
+                "styles": { "minify": true, "inlineCritical": false },
+                "fonts": false
+              },
               "budgets": [{"type":"initial","maximumWarning":"2MB","maximumError":"3MB"}],
               "outputHashing": "all"
             },

@@ -21,7 +21,8 @@ Comprobaciones preparadas para ejecutar localmente y en GitHub Actions:
 - No se ha recibido un CSV real de Trade Republic: se han usado fixtures sintéticos y una plantilla documentada. El mapeo de columnas no sustituye la comprobación de sus convenciones económicas.
 - No se han usado credenciales reales ni operaciones bancarias. La conexión no oficial necesita validación en vivo por el propietario.
 - Los ticks actuales se consultan automáticamente mediante el SDK; sus tests son simulados. Los cierres históricos ajustados y benchmarks siguen entrando por CSV.
-- No se ha hecho una inspección en navegador real. El entorno no ofrece una herramienta de control de navegador y el flujo de Sites utilizado no permite improvisar otra en ese caso; se han usado pruebas Angular con DOM simulado y comprobaciones HTTP del build.
+- Se han capturado e inspeccionado seis vistas en Chromium real: escritorio a 1440 px y vista móvil a 390 px. La sesión de captura no registró errores de consola ni excepciones y se comprobó la ausencia de desbordamiento horizontal en la vista móvil. No equivale a una auditoría completa de accesibilidad o de todos los navegadores.
+- La captura detectó que el script inline de carga de CSS crítico generado por Angular era bloqueado por CSP. Se desactivó `inlineCritical` manteniendo la política de scripts y se añadieron comprobaciones del HTML de producción para evitar esa regresión.
 - No se certifican resultados fiscales, datos corporativos o series ajustadas que no estén en las entradas.
 
 Los comandos reproducibles están en el README y el workflow `.github/workflows/ci.yml`.

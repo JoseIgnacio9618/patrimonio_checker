@@ -185,4 +185,6 @@ public/    Plantillas CSV y favicon
 docs/      Validación y próximos pasos
 ```
 
+Puedes ver [capturas reales de la aplicación](docs/capturas/README.md), con datos ficticios de demostración.
+
 Consulta [docs/VALIDACION.md](docs/VALIDACION.md) para el alcance verificado y [docs/ROADMAP.md](docs/ROADMAP.md) para las extensiones previstas.
