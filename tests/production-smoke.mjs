@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +20,9 @@ try{
   const dashboard=await (await fetch('http://127.0.0.1:3000/api/dashboard')).json();assert.equal(dashboard.transactionCount,0);
   const demo=await (await fetch('http://127.0.0.1:3000/api/dashboard?demo=1')).json();assert.ok(demo.value>0);
   const csv=await fetch('http://127.0.0.1:3000/plantilla-movimientos.csv');assert.equal(csv.status,200);assert.match(await csv.text(),/costBasis/);
-  console.log('Production smoke passed: compiled server, Angular entry and assets, local API, isolated demo, CSV template.');
+  const job=spawnSync(process.execPath,['dist/server/server/sync-cli.js','--scheduled'],{env:{...process.env,PATRIMONIO_DATA_DIR:directory},encoding:'utf8',timeout:10000});assert.equal(job.status,0,job.stderr);assert.match(job.stdout,/Job omitido/);
+  const missingSession=await fetch('http://127.0.0.1:3000/api/connection/sync',{method:'POST',headers:{'Content-Type':'application/json','X-Patrimonio':'local'},body:'{}'});assert.equal(missingSession.status,400);
+  console.log('Production smoke passed: server, Angular assets, API, isolated demo, templates, scheduled CLI and missing-session handling.');
 }finally{
   if(child.exitCode===null)child.kill('SIGTERM');await exited;rmSync(directory,{recursive:true,force:true});
 }

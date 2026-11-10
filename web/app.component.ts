@@ -1,7 +1,7 @@
-import { Component, computed, signal } from '@angular/core';
+import { Component, computed, signal, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ChartComponent } from './chart.component';
-import type { Dashboard, ImportPreview, Mapping, Transaction } from '../shared/types';
+import type { ConnectionState, Dashboard, ImportPreview, Mapping, SyncRun, Transaction } from '../shared/types';
 import { transactionTypes } from '../shared/types';
 import type { EChartsCoreOption } from 'echarts/core';
 
@@ -9,10 +9,9 @@ const euro = new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maxi
 const percent = new Intl.NumberFormat('es-ES',{style:'percent',maximumFractionDigits:2});
 const palette=['#17634e','#8ab994','#c5a35c','#728ab6','#ad94ba','#a3aaa5'];
 type View='overview'|'positions'|'transactions'|'income'|'analytics'|'projections'|'imports'|'connections'|'settings';
-interface ConnectionState {connected:boolean;enabled:boolean;intervalHours:number;lastSync?:string;lastAttempt?:string;error?:string;busy:boolean;inboxCount:number;observedCash?:{at:string;balances:{currency:string;amount:number}[]};}
 
 @Component({selector:'app-root',standalone:true,imports:[FormsModule,ChartComponent],templateUrl:'./app.component.html'})
-export class AppComponent {
+export class AppComponent implements OnDestroy {
   view=signal<View>('overview');
   demo=signal(false);
   data=signal<Dashboard|null>(null);
@@ -31,21 +30,33 @@ export class AppComponent {
   priceCsv=''; priceFilename=''; priceSeparator:'auto'|'.'|','='auto';
   imports=signal<{id:number;date:string;name:string;added:number;duplicates:number}[]>([]);
   connection=signal<ConnectionState|null>(null);
-  inbox=signal<{id:string;timestamp:string;title:string;eventType:string;status:string;amount:{value:number;currency:string}}[]>([]);
-  intervalHours=6; syncEnabled=false;
+  inbox=signal<{id:string;timestamp:string;title:string;eventType:string;status:string;outcome:string;reason:string;amount:{value:number;currency:string}}[]>([]);
+  runs=signal<SyncRun[]>([]);
+  portfolioSource=signal<'broker'|'ledger'>('broker');
+  intervalMinutes=360; syncEnabled=false;
+  tickerRules:{asset:string;id:string;currency:string;divisor:number}[]=[];
+  private destroyed=false;
+  private refreshTimer:ReturnType<typeof setInterval>;
   monthlyContribution=300; annualReturn=5; inflation=2;
   transactionTypes=transactionTypes;
   mappingFields:{key:keyof Mapping;label:string}[]=[{key:'date',label:'Fecha *'},{key:'type',label:'Tipo *'},{key:'amount',label:'Importe bruto *'},{key:'id',label:'ID de operación'},{key:'asset',label:'ISIN / símbolo'},{key:'name',label:'Nombre'},{key:'category',label:'Categoría'},{key:'quantity',label:'Unidades'},{key:'fee',label:'Comisiones'},{key:'tax',label:'Impuestos'},{key:'currency',label:'Divisa'},{key:'costBasis',label:'Coste original total'},{key:'note',label:'Nota'}];
   nav:{view:View;label:string;icon:string}[]=[{view:'overview',label:'Vista general',icon:'◫'},{view:'positions',label:'Mi cartera',icon:'▥'},{view:'transactions',label:'Movimientos',icon:'⇄'},{view:'income',label:'Ingresos pasivos',icon:'↗'},{view:'analytics',label:'Análisis y riesgo',icon:'◎'},{view:'projections',label:'Proyecciones',icon:'⌁'}];
   titles:Record<View,string>={overview:'Tu progreso, con perspectiva.',positions:'Cada activo, en detalle.',transactions:'La historia de tu dinero.',income:'Tu dinero también trabaja.',analytics:'Entiende lo que hay detrás.',projections:'Dale tiempo a tu futuro.',imports:'Todo empieza con tus datos.',connections:'Tus cuentas, conectadas.',settings:'Tus datos son tuyos.'};
   subtitles:Record<View,string>={overview:'Patrimonio, aportaciones y resultados en un solo lugar.',positions:'Posiciones reconstruidas a partir de tu historial de operaciones.',transactions:'Busca y revisa tus operaciones sin perder el contexto.',income:'Dividendos, intereses y Saveback a lo largo del tiempo.',analytics:'Rentabilidad, diversificación y una visión más amplia del riesgo.',projections:'Explora escenarios de ahorro e inversión, sin promesas.',imports:'Importa históricos completos o actualizaciones sin duplicar movimientos.',connections:'Sincronización experimental y control de la última actualización.',settings:'Exporta tus movimientos o guarda una copia completa de tu cartera.'};
-  constructor(){void this.reload();}
+  constructor(){void this.reload();this.refreshTimer=setInterval(()=>void this.refreshBackground(),15000);}
+  ngOnDestroy(){this.destroyed=true;clearInterval(this.refreshTimer);}
+  private async refreshBackground(){
+    if(this.busy()||this.destroyed||this.demo())return;
+    try{const c=await this.api<ConnectionState>('connection');if(this.destroyed||this.demo())return;const changed=c.lastSync!==this.connection()?.lastSync;this.connection.set(c);if(changed)this.data.set(await this.api('dashboard'));if(this.view()==='connections'){this.runs.set(await this.api('connection/runs'));this.inbox.set(await this.api('connection/inbox'));}}catch{/* background refresh never hides the last known portfolio */}
+  }
   money(n:number|null|undefined){return n==null?'—':euro.format(n);}
   pct(n:number|null|undefined){return n==null?'—':percent.format(n);}
   num(n:number|null|undefined,digits=4){return n==null?'—':new Intl.NumberFormat('es-ES',{maximumFractionDigits:digits}).format(n);}
   date(d:string|null|undefined){return d?new Intl.DateTimeFormat('es-ES',{day:'numeric',month:'short',year:'numeric'}).format(new Date(d.length===10?d+'T12:00:00':d)):'Sin datos';}
-  typeLabel(t:string){return ({DEPOSIT:'Aportación',WITHDRAWAL:'Retirada',BUY:'Compra',SELL:'Venta',DIVIDEND:'Dividendo',INTEREST:'Intereses',CARD_PAYMENT:'Pago con tarjeta',CARD_REFUND:'Reembolso tarjeta',SAVEBACK:'Saveback',FEE:'Comisión',TAX:'Impuesto',TRANSFER_IN:'Traspaso de entrada',TRANSFER_OUT:'Traspaso de salida'} as Record<string,string>)[t]??t;}
-  categoryLabel(t:string){return ({ETF:'ETF',STOCK:'Acciones',CRYPTO:'Cripto',GOLD:'Oro',FUND:'Fondos',OTHER:'Otros'} as Record<string,string>)[t]??t;}
+  dateTime(d:string|null|undefined){return d?new Intl.DateTimeFormat('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(d)):'Sin datos';}
+  typeLabel(t:string){return ({DEPOSIT:'Aportación',WITHDRAWAL:'Retirada',BUY:'Compra',SELL:'Venta',DIVIDEND:'Dividendo',INTEREST:'Intereses',CARD_PAYMENT:'Pago con tarjeta',CARD_REFUND:'Reembolso tarjeta',SAVEBACK:'Saveback',FEE:'Comisión',TAX:'Impuesto',TAX_REFUND:'Devolución de impuestos',TRANSFER_IN:'Traspaso de entrada',TRANSFER_OUT:'Traspaso de salida'} as Record<string,string>)[t]??t;}
+  categoryLabel(t:string){return ({ETF:'ETF',STOCK:'Acciones',CRYPTO:'Cripto',GOLD:'Oro',FUND:'Fondos',BOND:'Bonos',DERIVATIVE:'Derivados',PRIVATE:'Mercados privados',OTHER:'Otros'} as Record<string,string>)[t]??t;}
+  outcomeLabel(s:string){return ({imported:'Importado',matched:'Conciliado',pending:'Pendiente',ignored:'Sin efecto contable',conflict:'Revisar',running:'En curso',success:'Completado',partial:'Con observaciones',failed:'Error',manual:'Botón',scheduled:'Job',cli:'Terminal'} as Record<string,string>)[s]??s;}
   async api<T>(path:string,body?:unknown):Promise<T>{
     const response=await fetch(`/api/${path}${path.includes('?')?'&':'?'}demo=${this.demo()?'1':'0'}`,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json','X-Patrimonio':'local'},body:body===undefined?undefined:JSON.stringify(body)});
     const data=await response.json();
@@ -77,9 +88,24 @@ export class AppComponent {
   async analyzeImport(){await this.run(async()=>{this.preview.set(await this.api<ImportPreview>('import/preview',{csv:this.csv,mapping:this.mapping,separator:this.separator}));});}
   async commit(){await this.run(async()=>{const r=await this.api<{added:number;duplicates:number}>('import/commit',{csv:this.csv,mapping:this.mapping,separator:this.separator,name:this.filename});this.notice.set(`${r.added} movimientos importados · ${r.duplicates} duplicados omitidos.`);this.preview.set(null);this.csv='';this.filename='';this.data.set(await this.api('dashboard'));this.imports.set(await this.api('imports'));});}
   async importPrices(){await this.run(async()=>{const r=await this.api<{added:number}>('prices',{csv:this.priceCsv,separator:this.priceSeparator});this.data.set(await this.api('dashboard'));this.notice.set(`${r.added} cotizaciones guardadas.`);this.priceCsv='';this.priceFilename='';});}
-  async loadConnection(){await this.run(async()=>{const c=await this.api<ConnectionState>('connection');this.connection.set(c);this.syncEnabled=c.enabled;this.intervalHours=c.intervalHours;this.inbox.set(await this.api('connection/inbox'));});}
-  async saveConnection(){await this.run(async()=>{this.connection.set(await this.api('connection/config',{enabled:this.syncEnabled,intervalHours:this.intervalHours}));this.notice.set('Frecuencia guardada. La app debe permanecer abierta en tu ordenador.');});}
-  async sync(){await this.run(async()=>{this.connection.set(await this.api('connection/sync',{}));this.inbox.set(await this.api('connection/inbox'));this.notice.set('Sincronización completada. Revisa los eventos recibidos.');});}
+  async loadConnection(){await this.run(async()=>{const c=await this.api<ConnectionState>('connection');this.connection.set(c);this.syncEnabled=c.enabled;this.intervalMinutes=c.intervalMinutes;this.tickerRules=Object.entries(c.tickerOverrides??{}).map(([asset,r])=>({asset,...r}));this.inbox.set(await this.api('connection/inbox'));this.runs.set(await this.api('connection/runs'));});}
+  async saveConnection(){await this.run(async()=>{
+    const tickerOverrides:ConnectionState['tickerOverrides']={};for(const r of this.tickerRules){if(!r.asset.trim())throw new Error('Indica el activo de cada regla de mercado');if(tickerOverrides[r.asset.toUpperCase()])throw new Error('Hay reglas de mercado duplicadas');tickerOverrides[r.asset.toUpperCase()]={id:r.id,currency:r.currency,divisor:r.divisor};}
+    this.connection.set(await this.api('connection/config',{enabled:this.syncEnabled,intervalMinutes:this.intervalMinutes,tickerOverrides}));this.notice.set('Job guardado. Se ejecutará con el servidor activo; también puedes usar el comando tr:sync con el programador de tu sistema.');
+  });}
+  async sync(full=false){await this.run(async()=>{
+    const {runId}=await this.api<{runId:string}>('connection/sync',{full});
+    for(let poll=0;poll<150&&!this.destroyed;poll++){
+      const c=await this.api<ConnectionState>('connection');this.connection.set(c);
+      if(!c.busy){
+        this.data.set(await this.api('dashboard'));this.inbox.set(await this.api('connection/inbox'));this.runs.set(await this.api('connection/runs'));
+        const run=this.runs().find(r=>r.id===runId);if(run?.status==='failed')throw new Error(run.error??'La sincronización ha fallado');
+        this.notice.set(run?.summary?`${run.summary.positions} posiciones · ${run.summary.quotes} precios · ${run.summary.added} movimientos nuevos · ${run.summary.pending} pendientes · ${run.summary.conflicts} conflictos.`:'Recogida terminada.');return;
+      }
+      await new Promise(resolve=>setTimeout(resolve,2000));
+    }
+    if(!this.destroyed)this.notice.set('La recogida continúa en segundo plano. Puedes consultar el estado en Conexiones.');
+  });}
   async disconnect(){await this.run(async()=>{await this.api('connection/disconnect',{});this.connection.set(await this.api('connection'));this.syncEnabled=false;this.notice.set('Sesión local eliminada.');});}
   download(path:string){return `/api/export/${path}?demo=${this.demo()?'1':'0'}`;}
   get passiveNet(){const d=this.data();if(!d)return 0;return d.monthly.reduce((s,m)=>s+m.income,0);}
@@ -100,6 +126,7 @@ export class AppComponent {
       {name:'Aportaciones netas',data:points.map(p=>p.contributions),type:'line',showSymbol:false,lineStyle:{type:'dashed',width:1.5},itemStyle:{color:'#a5afa7'}}
     ]);
   });
+  readonly brokerChart=computed<EChartsCoreOption>(()=>{const h=this.data()?.brokerHistory??[];return this.lineOption(h.map(p=>p.at),[{name:'Patrimonio comunicado',type:'line',showSymbol:h.length<10,data:h.map(p=>p.value),itemStyle:{color:palette[0]},lineStyle:{width:3}}]);});
   readonly allocation=computed(()=>{
     const d=this.data();if(!d||d.value===null||d.value<=0)return[];
     const sums=new Map<string,number>();for(const p of d.positions)sums.set(this.categoryLabel(p.category),(sums.get(this.categoryLabel(p.category))??0)+(p.value??0));if(d.cash>0)sums.set('Efectivo',d.cash);

@@ -75,6 +75,7 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
       cash = cash.plus(cashDelta(t)); fees = fees.plus(t.fee); taxes = taxes.plus(t.tax);
       if (t.type === 'FEE') fees = fees.plus(t.amount);
       if (t.type === 'TAX') taxes = taxes.plus(t.amount);
+      if (t.type === 'TAX_REFUND') taxes = taxes.minus(t.amount);
       if (t.type === 'DIVIDEND') dividends = dividends.plus(t.amount);
       if (t.type === 'INTEREST') interest = interest.plus(t.amount);
       if (t.type === 'SAVEBACK') saveback = saveback.plus(t.amount);

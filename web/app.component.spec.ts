@@ -11,7 +11,7 @@ const empty:Dashboard={asOf:'2026-11-10',transactionCount:0,cash:0,value:0,contr
 describe('personal portfolio workflow',()=>{
   let fetchMock:ReturnType<typeof vi.fn>;
   beforeEach(async()=>{
-    fetchMock=vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes('/dashboard')?(url.includes('demo=1')?{...empty,transactionCount:10,value:12345}:empty):url.includes('/transactions')?{rows:[],total:0}:url.includes('/connection/inbox')?[]:url.includes('/connection')?{connected:false,enabled:false,intervalHours:6,inboxCount:0,busy:false}:[]}));
+    fetchMock=vi.fn(async(url:string)=>({ok:true,json:async()=>url.includes('/dashboard')?(url.includes('demo=1')?{...empty,transactionCount:10,value:12345}:empty):url.includes('/transactions')?{rows:[],total:0}:url.includes('/connection/inbox')||url.includes('/connection/runs')?[]:url.includes('/connection')?{connected:false,enabled:false,intervalMinutes:360,tickerOverrides:{},inboxCount:0,busy:false}:[]}));
     vi.stubGlobal('fetch',fetchMock);
     await TestBed.configureTestingModule({imports:[AppComponent]}).overrideComponent(AppComponent,{remove:{imports:[ChartComponent]},add:{imports:[ChartStub]}}).compileComponents();
   });
@@ -46,7 +46,34 @@ describe('personal portfolio workflow',()=>{
   });
   it('connection screen clearly separates broker activity from accounting data',async()=>{
     const fixture=TestBed.createComponent(AppComponent);await fixture.whenStable();await fixture.componentInstance.navigate('connections');fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('no los convierte automáticamente en operaciones');
+    expect(fixture.nativeElement.textContent).toContain('Actualización manual o mediante job');
     expect(fixture.nativeElement.querySelector('.connection-config .primary').disabled).toBe(true);
+  });
+  it('saves a periodic job with the chosen frequency and venue rules',async()=>{
+    const fixture=TestBed.createComponent(AppComponent);await fixture.whenStable();const app=fixture.componentInstance;
+    app.syncEnabled=true;app.intervalMinutes=15;app.tickerRules=[{asset:'btc',id:'BTC.BHS',currency:'EUR',divisor:1}];
+    await app.saveConnection();
+    const call=fetchMock.mock.calls.find(([url])=>String(url).includes('/connection/config'));
+    expect(call).toBeTruthy();const options=(call as unknown as [string,{body:string}])[1];
+    expect(JSON.parse(options.body)).toEqual({enabled:true,intervalMinutes:15,tickerOverrides:{BTC:{id:'BTC.BHS',currency:'EUR',divisor:1}}});
+    expect(app.notice()).toContain('Job guardado');
+  });
+  it('sync starts a job, polls its result, and refreshes the portfolio and ledger',async()=>{
+    const fixture=TestBed.createComponent(AppComponent);await fixture.whenStable();const app=fixture.componentInstance;
+    const summary={positions:3,quotes:3,added:2,matched:1,pending:0,ignored:0,conflicts:0};
+    fetchMock.mockImplementation(async(url:string)=>({ok:true,json:async()=>url.includes('/connection/sync')?{runId:'run-1'}:url.includes('/connection/runs')?[{id:'run-1',status:'success',summary}]:url.includes('/connection/inbox')?[]:url.includes('/connection')?{busy:false,connected:true}:url.includes('/dashboard')?{...empty,transactionCount:2,cash:499}:[]}));
+    await app.sync();fixture.detectChanges();
+    expect(app.data()?.transactionCount).toBe(2);expect(app.data()?.cash).toBe(499);expect(app.notice()).toContain('3 posiciones');expect(app.notice()).toContain('2 movimientos nuevos');expect(app.busy()).toBe(false);
+  });
+  it('a failed background sync shows the error and preserves the last portfolio',async()=>{
+    const fixture=TestBed.createComponent(AppComponent);await fixture.whenStable();const app=fixture.componentInstance;
+    fetchMock.mockImplementation(async(url:string)=>({ok:true,json:async()=>url.includes('/connection/sync')?{runId:'run-bad'}:url.includes('/connection/runs')?[{id:'run-bad',status:'failed',error:'Vuelve a autenticarte'}]:url.includes('/connection/inbox')?[]:url.includes('/connection')?{busy:false}:empty}));
+    await app.sync();expect(app.error()).toContain('Vuelve a autenticarte');expect(app.notice()).toBe('');expect(app.data()?.transactionCount).toBe(0);
+  });
+  it('broker holdings can be viewed before a complete transaction history exists',async()=>{
+    const fixture=TestBed.createComponent(AppComponent);await fixture.whenStable();const app=fixture.componentInstance;
+    app.data.set({...empty,broker:{at:'2026-11-10T10:00:00Z',positions:[{account:'masked',asset:'BTC',name:'Bitcoin',category:'CRYPTO',instrumentType:'crypto',quantity:'.01',averageBuyIn:'50000',currency:'EUR',price:'80000',priceAt:'2026-11-10T10:00:00Z',ticker:'BTC.BHS',value:800,warning:null}],balances:[{currency:'EUR',amount:'200'}],cashEUR:200,totalValue:1000,knownValue:1000,accountCount:1,unparsedProducts:0,warnings:[]}});
+    app.view.set('positions');fixture.detectChanges();expect(fixture.nativeElement.textContent).toContain('Posiciones en Trade Republic');expect(fixture.nativeElement.textContent).toContain('Bitcoin');
+    app.portfolioSource.set('ledger');fixture.detectChanges();expect(fixture.nativeElement.textContent).toContain('Todavía no tienes posiciones');
   });
 });

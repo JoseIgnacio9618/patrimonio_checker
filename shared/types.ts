@@ -1,6 +1,6 @@
-export const transactionTypes = ['DEPOSIT', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'CARD_PAYMENT', 'CARD_REFUND', 'SAVEBACK', 'FEE', 'TAX', 'TRANSFER_IN', 'TRANSFER_OUT'] as const;
+export const transactionTypes = ['DEPOSIT', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'CARD_PAYMENT', 'CARD_REFUND', 'SAVEBACK', 'FEE', 'TAX', 'TAX_REFUND', 'TRANSFER_IN', 'TRANSFER_OUT'] as const;
 export type TransactionType = typeof transactionTypes[number];
-export const categories = ['ETF', 'STOCK', 'CRYPTO', 'GOLD', 'FUND', 'OTHER'] as const;
+export const categories = ['ETF', 'STOCK', 'CRYPTO', 'GOLD', 'FUND', 'BOND', 'DERIVATIVE', 'PRIVATE', 'OTHER'] as const;
 export type Category = typeof categories[number];
 export interface Transaction {
   id: string; date: string; type: TransactionType; asset: string; name: string;
@@ -12,6 +12,7 @@ export type Mapping = Partial<Record<keyof Omit<Transaction, 'id'> | 'id', strin
 export interface ImportPreview {
   headers: string[]; mapping: Mapping; rows: Transaction[]; errors: { row: number; message: string }[];
   duplicates: number; conflicts: number; total: number; warnings: string[];
+  updates?: number;
 }
 export interface Position {
   asset: string; name: string; category: Category; quantity: number;
@@ -23,6 +24,8 @@ export interface HistoryPoint {
   twrIndex: number | null;
 }
 export interface Dashboard {
+  broker?: BrokerSnapshot | null;
+  brokerHistory?: {at:string;value:number|null}[];
   asOf: string; transactionCount: number; cash: number; value: number | null;
   contributions: number | null; profit: number | null; realized: number | null;
   unrealized: number | null; dividends: number; interest: number; saveback: number;
@@ -34,4 +37,26 @@ export interface Dashboard {
   disposals: { date: string; asset: string; quantity: number; proceeds: number; cost: number | null; gain: number | null; type: string }[];
   warnings: string[]; recent: Transaction[];
   benchmarks: { asset: string; points: { date: string; value: number }[] }[];
+}
+
+export interface BrokerPosition {
+  account: string; asset: string; name: string; category: Category; instrumentType: string;
+  quantity: string; averageBuyIn: string | null; currency: string;
+  price: string | null; priceAt: string | null; ticker: string;
+  value: number | null; warning: string | null;
+}
+export interface BrokerSnapshot {
+  at: string; positions: BrokerPosition[]; balances: {currency:string;amount:string}[];
+  totalValue: number | null; knownValue: number; cashEUR: number; accountCount: number;
+  unparsedProducts: number; warnings: string[];
+}
+export interface SyncSummary { positions:number; quotes:number; added:number; matched:number; pending:number; ignored:number; conflicts:number; }
+export interface SyncRun { id:string; trigger:'manual'|'scheduled'|'cli'; status:'running'|'success'|'partial'|'failed'; startedAt:string; finishedAt:string|null; summary:SyncSummary|null; error:string|null; }
+export interface ConnectionConfig {
+  enabled:boolean; intervalMinutes:number;
+  tickerOverrides:Record<string,{id:string;currency:string;divisor:number}>;
+}
+export interface ConnectionState extends ConnectionConfig {
+  connected:boolean; busy:boolean; lastAttempt:string|null; lastSync:string|null; nextRun:string|null;
+  error:string|null; inboxCount:number; lastRun:SyncRun|null;
 }

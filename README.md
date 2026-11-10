@@ -37,7 +37,7 @@ Abre http://127.0.0.1:4200. El frontend redirige `/api` al backend local en el p
 - Proyecciones a 5, 10, 15 y 20 años, con inflación y supuestos ajustables.
 - Importación con vista previa, asignación de columnas, errores por fila, IDs y deduplicación.
 - Importación de precios, exportación de movimientos y copia/restauración JSON.
-- Conector experimental de Trade Republic con sesión cifrada, programación y bandeja de actividad.
+- Actualización desde Trade Republic mediante botón o job periódico, con posiciones por cuenta, precios, movimientos normalizados, conciliación con CSV, ejecuciones y fotografías de la cartera.
 
 ## Primeros pasos con tus datos
 
@@ -49,6 +49,8 @@ Abre http://127.0.0.1:4200. El frontend redirige `/api` al backend local en el p
 6. Reimporta los históricos actualizados cuando quieras. Un ID repetido idéntico se omite; si sus datos cambian, se muestra un conflicto.
 
 **No se ha probado con tu CSV real.** El importador tiene alias de cabeceras españoles, ingleses y algunos alemanes, y permite reasignarlas. No afirma compatibilidad universal con todas las variantes del exportador de Trade Republic. Los tipos desconocidos no se descartan silenciosamente. No importa PDF.
+
+CSV y API se concilian por ID o alias persistente. Con IDs diferentes se busca una coincidencia económica única entre fuentes: fecha, tipo, activo, unidades, bruto, comisión, impuesto y divisa. Dos coincidencias idénticas generan un conflicto para revisar; no se adivina cuál es correcta. Un CSV también puede completar el coste original y el valor de entrada de un traspaso previamente recogido por API.
 
 Sin ID se usa una huella de los datos normalizados y su número de repetición. Así se conservan dos operaciones idénticas dentro del mismo archivo y se omiten al reimportar ese mismo histórico. Dos operaciones idénticas en archivos parciales distintos son indistinguibles: conserva IDs o importa históricos completos. No se concilian automáticamente IDs diferentes de brokers diferentes.
 
@@ -63,7 +65,7 @@ Consulta [public/plantilla-movimientos.csv](public/plantilla-movimientos.csv). *
 | `type` | Tipo normalizado de la lista siguiente. |
 | `asset` | ISIN o símbolo estable, requerido si se mueven unidades. |
 | `name` | Nombre legible. |
-| `category` | `ETF`, `STOCK`, `CRYPTO`, `GOLD`, `FUND` u `OTHER`. |
+| `category` | `ETF`, `STOCK`, `CRYPTO`, `GOLD`, `FUND`, `BOND`, `DERIVATIVE`, `PRIVATE` u `OTHER`. |
 | `quantity` | Unidades positivas en compras, ventas y traspasos; cero en otros movimientos. |
 | `amount` | Importe bruto. Su valor absoluto se interpreta según el tipo. En traspasos, valor total de mercado al entrar o salir. |
 | `fee`, `tax` | Costes positivos de ese movimiento, nunca negativos. |
@@ -71,11 +73,11 @@ Consulta [public/plantilla-movimientos.csv](public/plantilla-movimientos.csv). *
 | `costBasis` | Coste original **total** de un traspaso de entrada, no precio unitario. Vacío si se desconoce. |
 | `note` | Nota opcional. |
 
-Tipos: `DEPOSIT`, `WITHDRAWAL`, `BUY`, `SELL`, `DIVIDEND`, `INTEREST`, `CARD_PAYMENT`, `CARD_REFUND`, `SAVEBACK`, `FEE`, `TAX`, `TRANSFER_IN`, `TRANSFER_OUT`. Los movimientos genéricos de transferencia deben clasificarse: dinero propio (`DEPOSIT` / `WITHDRAWAL`) y traspasos de valores (`TRANSFER_IN` / `TRANSFER_OUT`) tienen efectos diferentes.
+Tipos: `DEPOSIT`, `WITHDRAWAL`, `BUY`, `SELL`, `DIVIDEND`, `INTEREST`, `CARD_PAYMENT`, `CARD_REFUND`, `SAVEBACK`, `FEE`, `TAX`, `TAX_REFUND`, `TRANSFER_IN`, `TRANSFER_OUT`. Los movimientos genéricos de transferencia deben clasificarse: dinero propio (`DEPOSIT` / `WITHDRAWAL`) y traspasos de valores (`TRANSFER_IN` / `TRANSFER_OUT`) tienen efectos diferentes.
 
 Separadores admitidos: coma, punto y coma o tabulador; codificación UTF-8. Máximo 12 MB / 50.000 filas por importación. Para números internacionales como `1,234.56`, elige explícitamente el formato internacional. El modo automático interpreta una coma como separador decimal. Sin coma, un punto es decimal.
 
-Solo EUR: convierte otras divisas con tipos documentados antes de importar. No hay conversión FX automática ni soporte de splits, fusiones, opciones, ventas en corto o cuentas múltiples. Ordena correctamente las operaciones de un mismo día: FIFO mantiene el orden de llegada para empates. Una salida anterior a la compra correspondiente se señala como historial incompleto.
+Solo EUR: convierte otras divisas con tipos documentados antes de importar. No hay conversión FX automática ni tratamiento especializado de splits, fusiones, opciones o ventas en corto. Las posiciones actuales se consultan por cuenta; el historial contable y FIFO se agregan por activo en una sola cartera. Ordena correctamente las operaciones de un mismo día: FIFO mantiene el orden de llegada para empates. Una salida anterior a la compra correspondiente se señala como historial incompleto.
 
 ### Bitcoin transferido desde Binance
 
@@ -87,7 +89,7 @@ Si falta `costBasis`, la app no inventa un coste cero. La ganancia FIFO y el res
 
 [public/plantilla-precios.csv](public/plantilla-precios.csv): `asset,date,price`, opcionalmente `currency` que debe ser EUR. `price` es el cierre por unidad en euros, estrictamente positivo. Importar de nuevo una fecha/activo actualiza su precio.
 
-Los precios se proporcionan mediante CSV: **no hay un proveedor automático de cotizaciones activado**. No se confunde el precio de compra con el valor actual. Una cotización ausente o con más de 7 días de antigüedad deja la valoración afectada sin calcular. Para días sin sesión se arrastra el último cierre hasta ese límite, y se indica la fecha del precio.
+La cartera comunicada recibe cotizaciones actuales del SDK en cada recogida. Los cierres históricos y benchmarks se proporcionan mediante CSV: **el SDK no se usa como proveedor de series históricas ajustadas**. Sus ticks actuales se guardan con hora en la fotografía del broker; no se escriben como cierres diarios, para evitar fabricar un histórico. No se confunde el precio de compra con el valor actual. Una cotización ausente o con más de 7 días de antigüedad deja la valoración afectada sin calcular. Para días sin sesión se arrastra el último cierre hasta ese límite, y se indica la fecha del precio.
 
 Los símbolos con prefijo `BENCH:`, por ejemplo `BENCH:SP500`, `BENCH:MSCI_WORLD`, `BENCH:GOLD` o `BENCH:BTC`, alimentan comparativas normalizadas a 100. No forman parte de tus posiciones. Usa datos consistentes en EUR, preferiblemente índices de retorno total para comparar carteras que cobran dividendos. Cada serie se normaliza en su primer dato disponible dentro del periodo; si falta el inicio, los horizontes pueden diferir.
 
@@ -104,21 +106,52 @@ Los símbolos con prefijo `BENCH:`, por ejemplo `BENCH:SP500`, `BENCH:MSCI_WORLD
 
 No es un programa de presentación de impuestos. Los lotes transferidos fuera, por ejemplo, no generan una venta en esta cartera; para conocer el resultado fiscal global necesitas el historial completo de todas tus cuentas.
 
-## Conexión experimental a Trade Republic
+## Actualización con Trade Republic y jobs
 
-Usa [`trade-republic-sdk` 0.5.0](https://github.com/Nils-Fischer/trade-republic-sdk), una librería **no oficial**. El adaptador de esta app solo llama a autenticación/refresco, lectura de efectivo y lectura de timeline. No expone órdenes, pagos ni transferencias.
+Usa [`trade-republic-sdk` 0.5.0](https://github.com/Nils-Fischer/trade-republic-sdk), una librería **no oficial**, mediante operaciones de lectura: `cash`, `accountPairs`, `compactPortfolioByType`, `ticker`, historial paginado y `timelineDetailV2`. No se exponen órdenes, pagos ni transferencias.
+
+### Conectar una vez
 
 ```sh
 npm run tr:connect
 ```
 
-Introduce teléfono y PIN **solo en tu terminal** y aprueba la petición en tu móvil. El PIN no se muestra ni se guarda. No pases credenciales por chat, argumentos o archivos del repositorio. La sesión se cifra con AES-256-GCM; `data/session.key` tiene permisos `0600`. La sesión cifrada se almacena en SQLite y nunca forma parte de una copia exportada.
+Introduce teléfono y PIN **solo en tu terminal** y aprueba la petición en el móvil. El PIN no se guarda. La sesión se cifra con AES-256-GCM y la clave `data/session.key` tiene permisos `0600`. Si el broker exige autenticación de nuevo, repite el comando. No envíes el PIN ni sesiones por chat.
 
-En **Conexiones**, activa la frecuencia (por defecto cada 6 horas), o sincroniza manualmente. El servidor debe estar ejecutándose. El planificador comprueba cada minuto; evita ejecuciones solapadas y repeticiones dentro del intervalo incluso tras fallos. La primera lectura pide el histórico desde 2000; las siguientes releen 7 días para recoger cambios recientes. Puede requerir reautenticación.
+### Botón o CSV
 
-**Alcance real:** guarda el saldo comunicado y los eventos en una bandeja de revisión persistente y deduplicada. El timeline puede carecer de unidades, ISIN, costes o estado definitivo, por lo que **no se convierte automáticamente en contabilidad** ni se mezcla con los CSV. Las operaciones contables siguen entrando por CSV validado. Se muestran los últimos 500 eventos, conservando el resto en SQLite.
+- **Importaciones:** puedes seguir subiendo CSV con vista previa y confirmación.
+- **Conexiones → Actualizar ahora:** inicia una ejecución en segundo plano. La interfaz muestra el resultado y actualiza la cartera y los movimientos.
+- **Revisar histórico completo:** vuelve a consultar el historial desde 2000; las consultas incrementales releen 7 días y reintentan eventos pendientes anteriores.
+- **Mi cartera:** alterna entre posiciones comunicadas por el broker y posiciones reconstruidas del historial. La vista general muestra patrimonio comunicado, precios con fecha y las últimas 1.000 fotografías guardadas.
 
-El conector tiene pruebas con cliente simulado, cifrado, fallos y planificación. **No se ha conectado a tu cuenta ni validado en vivo.** Una importación automática completa de todas las operaciones requerirá verificar los detalles/documentos del broker con una sesión real y reconciliarlos con el CSV. No hay sincronización Binance implementada; la separación entre adaptadores permite incorporarla después.
+La recogida consulta todas las cuentas de valores devueltas por el SDK, conserva las categorías recibidas y obtiene precios por instrumento. Acciones, ETF, cripto, bonos, fondos, derivados y mercados privados pueden aparecer como posiciones; que aparezcan no implica que haya precio disponible o que sus operaciones tengan un tratamiento fiscal especializado. Los productos adicionales que no tienen una posición interpretable se cuentan y se señalan como pendientes, sin inventar su valoración.
+
+Por defecto se consulta `ISIN.LSX` para valores y `ISIN.BHS` para cripto, en la divisa de la cuenta (EUR si no se comunica). En **Mercados por activo** puedes configurar ticker, divisa y divisor. Los bonos usan divisor 100 para convertir una cotización porcentual en precio por nominal. Una cotización ausente, obsoleta o en otra divisa deja su valor en EUR sin calcular. La suma conocida se muestra por separado cuando no hay un patrimonio total completo.
+
+### Movimientos y conciliación
+
+Los movimientos ejecutados reconocidos se normalizan automáticamente: compras/ventas ordinarias y planes, ingresos/retiradas, tarjeta, intereses, dividendos, impuestos/devoluciones y traspasos identificables. Se recuperan detalles anidados para unidades, comisiones y retenciones. El bruto se reconstruye a partir del neto y costes; los separadores ambiguos se contrastan con cantidad y precio cuando es posible.
+
+Los eventos desconocidos, Saveback reinvertido sin desglose suficiente, operaciones corporativas, cantidades ambiguas o detalles ausentes quedan pendientes. Pendientes y cancelados no se contabilizan como ejecutados. Si cambia un evento ya registrado se crea un conflicto y se conserva la operación existente. Se comparan efectivo y unidades reconstruidos con la fotografía del broker para señalar huecos del historial. No se usa el precio medio comunicado para inventar lotes FIFO.
+
+### Crear un job desde la app
+
+En **Conexiones**, activa **Job periódico**, indica el intervalo en minutos (de 5 a 10.080; por defecto 360) y pulsa **Guardar job**. Con el servidor activo, se comprueba cada minuto y se ejecuta también al arrancar si corresponde. **La pestaña puede estar cerrada.** La frecuencia y el historial de ejecuciones se conservan en SQLite. La interfaz muestra la próxima ejecución y las 30 últimas, con estado, posiciones, precios, movimientos y pendientes.
+
+Una concesión de exclusión en SQLite impide ejecuciones solapadas entre el botón, el servidor y procesos externos. Los fallos respetan el intervalo de reintento, conservan la última fotografía correcta y ocultan los detalles técnicos que pudieran contener credenciales. La recogida tiene un límite global de 4 minutos y la concesión caduca a los 5 minutos si el proceso termina inesperadamente.
+
+### Ejecutarlo con el servidor web apagado
+
+```sh
+npm run tr:sync                  # Recogida manual desde terminal
+npm run tr:sync -- --full        # Recorrido completo
+npm run tr:sync -- --scheduled   # Solo ejecuta si el job está activado y corresponde
+```
+
+Para usar cron, systemd o el Programador de tareas de Windows, programa el tercer comando cada minuto o cada 5 minutos. Establece como directorio de trabajo la raíz del proyecto, usa la misma cuenta del sistema que hizo el login y mantén la misma `PATRIMONIO_DATA_DIR`. El propio comando comprueba la frecuencia guardada: no hace falta instalar una segunda planificación independiente con la duración exacta. Consulta [docs/JOBS.md](docs/JOBS.md) para ejemplos.
+
+**Validación:** las pruebas usan un cliente simulado con las formas de respuesta del SDK instalado. No se ha iniciado sesión en tu cuenta ni confirmado en vivo la cobertura de todos tus productos o del CSV real. La API privada puede cambiar y algunos activos pueden necesitar otra regla de mercado. No hay sincronización Binance: su coste original debe aportarse aparte.
 
 ## Datos, copias y seguridad local
 
@@ -129,7 +162,7 @@ El conector tiene pruebas con cliente simulado, cifrado, fallos y planificación
 - No expongas el servidor a Internet. No incorpora autenticación multiusuario; otro proceso de tu usuario local puede acceder. Para hosting harían falta autenticación, aislamiento y otro modelo de secretos y almacenamiento.
 - `.gitignore` excluye datos, claves, `.env`, dependencias y builds. Ningún dato bancario real está incluido.
 
-**Mis datos → Descargar copia completa** exporta un JSON de versión 1 con movimientos y precios; no incluye sesión, clave, actividad del conector ni historial de importaciones. Restaura en una base vacía, con validación atómica. Para un respaldo de toda la instalación, detén el servidor antes de copiar la carpeta `data/` y guarda esa copia de forma privada. El CSV exportado está protegido frente a fórmulas de hojas de cálculo; usa JSON para restaurar IDs y orden exactamente.
+**Mis datos → Descargar copia completa** exporta un JSON de versión 2 con movimientos, precios, fotografías del broker y alias/origen de conciliación; no incluye sesión, clave, configuración del job, actividad del conector ni historial de importaciones/ejecuciones. Se aceptan también copias de versión 1. Restaura en una base vacía, con validación atómica. Para un respaldo de toda la instalación, detén el servidor antes de copiar la carpeta `data/` y guarda esa copia de forma privada. El CSV exportado está protegido frente a fórmulas de hojas de cálculo; usa JSON para restaurar IDs y orden exactamente.
 
 ## Pruebas y estructura
 

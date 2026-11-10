@@ -60,3 +60,39 @@ test('SQLite retains exact decimal strings across process restart',()=>{
     const reopened=new Store(db);assert.equal(reopened.prices()[0].price,'12345.67890123456789');reopened.close();
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('button sync returns a background job and status endpoints expose its result without leaking sessions',async t=>{
+  const {Connection,encrypt}=await import('../server/connection.js');const {fakeClient,detail}=await import('./tr-fixtures.js');const {randomBytes}=await import('node:crypto');
+  const store=new Store(':memory:'),key=randomBytes(32);t.after(()=>store.close());store.set('session',encrypt('sensitive-session',key));
+  let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
+  const connection=new Connection(store,()=>key,()=>fakeClient({refresh:async()=>gate,timelineDetailV2:{get:async({id})=>id==='buy'?detail({Shares:'5',Fee:'1 €'}):detail({})}}));
+  const api=request(createApp(store,connection));
+  const start=await api.post('/api/connection/sync').set('X-Patrimonio','local').send({full:false}).expect(202);assert.ok(start.body.runId);
+  const status=await api.get('/api/connection').expect(200);assert.equal(status.body.busy,true);assert.ok(!JSON.stringify(status.body).includes('sensitive-session'));
+  await api.post('/api/connection/sync').set('X-Patrimonio','local').send({}).expect(400);
+  await api.post('/api/connection/sync?demo=1').set('X-Patrimonio','local').send({}).expect(400);
+  release();await connection.wait();
+  const portfolio=await api.get('/api/portfolio').expect(200);assert.equal(portfolio.body.totalValue,1099);
+  const dashboard=await api.get('/api/dashboard').expect(200);assert.equal(dashboard.body.broker.positions.length,1);assert.equal(dashboard.body.transactionCount,2);
+  const runs=await api.get('/api/connection/runs').expect(200);assert.equal(runs.body[0].status,'success');
+  const config=await api.post('/api/connection/config').set('X-Patrimonio','local').send({enabled:true,intervalMinutes:15}).expect(200);assert.equal(config.body.intervalMinutes,15);assert.ok(config.body.nextRun);
+  await api.post('/api/connection/config').set('X-Patrimonio','local').send({enabled:true,intervalMinutes:0}).expect(400);
+  const backup=await api.get('/api/export/backup').expect(200);assert.equal(backup.body.version,2);assert.equal(backup.body.brokerSnapshots.length,1);assert.ok(!JSON.stringify(backup.body).includes('sensitive-session'));
+  const second=setup();t.after(()=>second.store.close());await second.api.post('/api/restore').set('X-Patrimonio','local').send(backup.body).expect(200);assert.deepEqual(second.store.snapshot(),store.snapshot());
+});
+
+test('CSV after API is reconciled and its alias survives backup restore and a second CSV import',async t=>{
+  const {Connection,encrypt}=await import('../server/connection.js');const {fakeClient,event}=await import('./tr-fixtures.js');const {randomBytes}=await import('node:crypto');
+  const store=new Store(':memory:'),key=randomBytes(32);t.after(()=>store.close());store.set('session',encrypt('session',key));
+  await new Connection(store,()=>key,()=>fakeClient({getTimelineTransactions:async()=>[event()]})).sync();
+  const api=request(createApp(store)),csv='id,date,type,amount\nCSV-REF,2026-01-01,DEPOSIT,1000';
+  const first=await api.post('/api/import/commit').set('X-Patrimonio','local').send({csv}).expect(200);assert.equal(first.body.added,0);assert.equal(first.body.duplicates,1);
+  const backup=await api.get('/api/export/backup').expect(200);const restored=setup();t.after(()=>restored.store.close());await restored.api.post('/api/restore').set('X-Patrimonio','local').send(backup.body).expect(200);
+  const repeated=await restored.api.post('/api/import/commit').set('X-Patrimonio','local').send({csv}).expect(200);assert.equal(repeated.body.duplicates,1);assert.equal(restored.store.transactions().length,1);
+});
+
+test('backup restores tiny crypto quantities emitted in scientific notation',async t=>{
+  const first=setup();const second=setup();t.after(()=>{first.store.close();second.store.close();});
+  await first.api.post('/api/import/commit').set('X-Patrimonio','local').send({csv:'id,date,type,asset,quantity,amount\ntiny,2026-01-01,TRANSFER_IN,BTC,0.00000001,0.0001'}).expect(200);
+  const backup=await first.api.get('/api/export/backup').expect(200);await second.api.post('/api/restore').set('X-Patrimonio','local').send(backup.body).expect(200);assert.deepEqual(second.store.transactions(),first.store.transactions());
+});

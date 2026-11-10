@@ -32,6 +32,7 @@ add('CARD_REFUND', ['reembolso tarjeta', 'card refund']);
 add('SAVEBACK', ['cashback']);
 add('FEE', ['comision', 'comisiones']);
 add('TAX', ['impuesto', 'impuestos']);
+add('TAX_REFUND', ['devolucion de impuestos', 'tax refund']);
 add('TRANSFER_IN', ['traspaso entrada', 'asset transfer in']);
 add('TRANSFER_OUT', ['traspaso salida', 'asset transfer out']);
 
