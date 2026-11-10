@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist/server",
+    "rootDir": ".",
+    "types": ["node"],
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts"]
+}

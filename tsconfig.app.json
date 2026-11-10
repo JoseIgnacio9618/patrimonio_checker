@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "dist/out-tsc", "types": [] },
+  "files": ["web/main.ts"],
+  "include": ["web/**/*.ts", "shared/**/*.ts"]
+}
