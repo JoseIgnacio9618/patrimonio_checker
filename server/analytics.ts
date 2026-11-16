@@ -10,7 +10,7 @@ type Holding = { asset: string; name: string; category: Position['category']; qu
 
 export function cashDelta(tx: Transaction): Decimal {
   const amount = D(tx.amount), costs = D(tx.fee).plus(tx.tax);
-  if (['BUY', 'WITHDRAWAL', 'CARD_PAYMENT', 'FEE', 'TAX'].includes(tx.type)) return amount.negated().minus(costs);
+  if (['BUY', 'WITHDRAWAL', 'CARD_PAYMENT', 'DIRECT_DEBIT', 'FEE', 'TAX'].includes(tx.type)) return amount.negated().minus(costs);
   if (['TRANSFER_IN', 'TRANSFER_OUT'].includes(tx.type)) return costs.negated();
   return amount.minus(costs);
 }
@@ -50,7 +50,7 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
   const history: HistoryPoint[] = [];
   const monthlyMap = new Map<string, Dashboard['monthly'][number]>();
   let cash = D(0), contributions = D(0), contributionKnown = true;
-  let fees = D(0), taxes = D(0), dividends = D(0), interest = D(0), saveback = D(0), spending = D(0);
+  let fees = D(0), taxes = D(0), dividends = D(0), interest = D(0), saveback = D(0), rewards = D(0), spending = D(0);
   let priceIndex = 0, twrIndex = 1, returnsValid = true;
   const dailyReturns: number[] = [];
   const externalFlows: { date: string; amount: number }[] = [];
@@ -79,10 +79,11 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
       if (t.type === 'DIVIDEND') dividends = dividends.plus(t.amount);
       if (t.type === 'INTEREST') interest = interest.plus(t.amount);
       if (t.type === 'SAVEBACK') saveback = saveback.plus(t.amount);
-      if (['DIVIDEND', 'INTEREST', 'SAVEBACK'].includes(t.type)) dayIncome = dayIncome.plus(D(t.amount).minus(t.fee).minus(t.tax));
+      if (t.type === 'REWARD') rewards = rewards.plus(t.amount);
+      if (['DIVIDEND', 'INTEREST', 'SAVEBACK', 'REWARD'].includes(t.type)) dayIncome = dayIncome.plus(D(t.amount).minus(t.fee).minus(t.tax));
       if (t.type === 'DEPOSIT') flow = flow.plus(t.amount);
       if (t.type === 'WITHDRAWAL') flow = flow.minus(t.amount);
-      if (t.type === 'CARD_PAYMENT') { flow = flow.minus(t.amount); spending = spending.plus(t.amount); monthly.spending += money(t.amount); }
+      if (t.type === 'CARD_PAYMENT' || t.type === 'DIRECT_DEBIT') { flow = flow.minus(t.amount); spending = spending.plus(t.amount); monthly.spending += money(t.amount); }
       if (t.type === 'CARD_REFUND') { flow = flow.plus(t.amount); spending = spending.minus(t.amount); monthly.spending -= money(t.amount); }
       if (['TRANSFER_IN', 'TRANSFER_OUT'].includes(t.type)) {
         const quote = getQuote(t.asset, date);
@@ -187,7 +188,7 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
     contributions: contributionKnown ? money(contributions) : null,
     profit: latestValue !== null && contributionKnown && !cash.isNegative() ? money(D(latestValue).minus(contributions)) : null,
     realized: realized === null ? null : money(realized), unrealized: unrealized === null ? null : money(unrealized),
-    dividends: money(dividends), interest: money(interest), saveback: money(saveback), income: money(dividends.plus(interest).plus(saveback)),
+    dividends: money(dividends), interest: money(interest), saveback: money(saveback), income: money(dividends.plus(interest).plus(saveback).plus(rewards)),
     fees: money(fees), taxes: money(taxes), spending: money(spending),
     twr: valid ? twrIndex - 1 : null, xirr: irr, volatility, sharpe, maxDrawdown,
     hhi: latestValue !== null && latestValue > 0 && !cash.isNegative() ? positions.reduce((s,p) => s+(p.weight ?? 0)**2, (money(cash)/latestValue)**2) : null,

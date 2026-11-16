@@ -50,7 +50,7 @@ Abre http://127.0.0.1:4200. El frontend redirige `/api` al backend local en el p
 5. Importa cotizaciones de cierre en EUR para valorar los activos. Necesitas un histórico de precios para las métricas históricas, además de precios recientes para la valoración actual.
 6. Reimporta los históricos actualizados cuando quieras. Un ID repetido idéntico se omite; si sus datos cambian, se muestra un conflicto.
 
-**No se ha probado con tu CSV real.** El importador tiene alias de cabeceras españoles, ingleses y algunos alemanes, y permite reasignarlas. No afirma compatibilidad universal con todas las variantes del exportador de Trade Republic. Los tipos desconocidos no se descartan silenciosamente. No importa PDF.
+El CSV de Trade Republic con columnas `transaction_id`, `account_type` y `asset_class` se reconoce automáticamente. Se respetan los importes brutos y se normalizan los signos de unidades y costes. Cuando falta el importe de una compraventa, la vista previa señala el importe estimado con las unidades y el precio del archivo. Una entrega gratuita registra el valor derivado del precio y deja el coste de adquisición pendiente. Una migración emparejada del mismo activo conserva ambos apuntes sin modificar el saldo ni el coste FIFO. Los tipos desconocidos requieren revisión.
 
 CSV y API se concilian por ID o alias persistente. Con IDs diferentes se busca una coincidencia económica única entre fuentes: fecha, tipo, activo, unidades, bruto, comisión, impuesto y divisa. Dos coincidencias idénticas generan un conflicto para revisar; no se adivina cuál es correcta. Un CSV también puede completar el coste original y el valor de entrada de un traspaso previamente recogido por API.
 
@@ -76,7 +76,7 @@ Consulta [public/plantilla-movimientos.csv](public/plantilla-movimientos.csv). *
 | `acquisitionDate` | Fecha original de compra de un lote transferido; requerida junto con su coste para el cálculo fiscal. |
 | `note` | Nota opcional. |
 
-Tipos: `DEPOSIT`, `WITHDRAWAL`, `BUY`, `SELL`, `DIVIDEND`, `INTEREST`, `CARD_PAYMENT`, `CARD_REFUND`, `SAVEBACK`, `FEE`, `TAX`, `TAX_REFUND`, `TRANSFER_IN`, `TRANSFER_OUT`. Los movimientos genéricos de transferencia deben clasificarse: dinero propio (`DEPOSIT` / `WITHDRAWAL`) y traspasos de valores (`TRANSFER_IN` / `TRANSFER_OUT`) tienen efectos diferentes.
+Tipos: `DEPOSIT`, `WITHDRAWAL`, `BUY`, `SELL`, `DIVIDEND`, `INTEREST`, `CARD_PAYMENT`, `CARD_REFUND`, `DIRECT_DEBIT`, `SAVEBACK`, `REWARD`, `FEE`, `TAX`, `TAX_REFUND`, `TRANSFER_IN`, `TRANSFER_OUT`, `MIGRATION`. Clasifica las transferencias de efectivo como `DEPOSIT` o `WITHDRAWAL`, y los traspasos de valores como `TRANSFER_IN` o `TRANSFER_OUT`.
 
 Separadores admitidos: coma, punto y coma o tabulador; codificación UTF-8. Máximo 12 MB / 50.000 filas por importación. Para números internacionales como `1,234.56`, elige explícitamente el formato internacional. El modo automático interpreta una coma como separador decimal. Sin coma, un punto es decimal.
 

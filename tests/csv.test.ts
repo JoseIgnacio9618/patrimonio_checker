@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { dateString, numberString, parsePrices, previewCsv } from '../server/csv.js';
+import { cashDelta } from '../server/analytics.js';
 
 test('European decimals, thousands, BOM, CRLF and quoted delimiter normalize correctly',()=>{
   const csv='\uFEFFID;Fecha;Tipo;ISIN;Nombre;Cantidad;Importe;Comisión;Impuestos;Divisa\r\n1;31/01/2026;Compra;BTC;"Bitcoin; inversión";0,01234567;"1.234,56";1,00;0;EUR';
@@ -43,4 +44,48 @@ test('oversized records, duplicate columns and malformed CSV are rejected',()=>{
   assert.throws(()=>previewCsv('date,date,amount\n2026-01-01,DEPOSIT,10'));
   assert.throws(()=>previewCsv('date,type,amount\n2026-01-01,"DEPOSIT,10'));
   assert.throws(()=>previewCsv('date,type,amount,note\n2026-01-01,DEPOSIT,10,'+'x'.repeat(21000)));
+});
+
+const tradeRepublicHeader = 'datetime,date,account_type,category,type,asset_class,symbol,shares,price,amount,fee,tax,currency,transaction_id';
+
+test('Trade Republic export preserves gross trades and classifies signed cash movements', () => {
+  const csv = [
+    tradeRepublicHeader,
+    '2026-01-02T12:00:00Z,2026-01-02,DEFAULT,TRADING,SELL,FUND,TEST,-1,100,100,-1,-2,EUR,sell',
+    '2026-01-02T11:00:00Z,2026-01-02,DEFAULT,TRADING,BUY,FUND,TEST,2,100,-200,-1,,EUR,buy',
+    '2026-01-02T13:00:00Z,2026-01-02,DEFAULT,CASH,TRANSFER_INSTANT_INBOUND,,,,,-8,,,EUR,transfer',
+    '2026-01-02T14:00:00Z,2026-01-02,DEFAULT,CASH,CARD_TRANSACTION,,,,,5,,,EUR,card',
+    '2026-01-02T15:00:00Z,2026-01-02,DEFAULT,CASH,TRANSFER_DIRECT_DEBIT_INBOUND,,,,,-3,,,EUR,debit',
+    '2026-01-02T16:00:00Z,2026-01-02,DEFAULT,CASH,INTEREST_PAYMENT,,,,,10,,-2,EUR,interest',
+    '2026-01-02T17:00:00Z,2026-01-02,DEFAULT,CASH,BONUS,,,,,2,,,EUR,bonus',
+  ].join('\n');
+  const preview = previewCsv(csv);
+  assert.deepEqual(preview.errors, []);
+  assert.equal(preview.mapping.category, 'asset_class');
+  assert.equal(preview.rows[0].category, 'FUND');
+  assert.deepEqual(preview.rows.map(row => [row.type, row.amount, cashDelta(row).toFixed()]), [
+    ['BUY', '200', '-201'], ['SELL', '100', '97'], ['WITHDRAWAL', '8', '-8'],
+    ['CARD_REFUND', '5', '5'], ['DIRECT_DEBIT', '3', '-3'], ['INTEREST', '10', '8'], ['REWARD', '2', '2'],
+  ]);
+  assert.equal(previewCsv(csv, preview.rows, preview.mapping).duplicates, 7);
+});
+
+test('Trade Republic estimates missing trade amounts and records matched migrations without moving assets', () => {
+  const rows = [
+    tradeRepublicHeader,
+    '2026-01-02T11:00:00Z,2026-01-02,DEFAULT,DELIVERY,MIGRATION,FUND,TEST,-2,10,,,,EUR,out',
+    '2026-01-02T11:00:01Z,2026-01-02,DEFAULT,DELIVERY,MIGRATION,FUND,TEST,2,10,,,,EUR,in',
+    '2026-01-02T12:00:00Z,2026-01-02,DEFAULT,TRADING,BUY,FUND,TEST,1.25,2.4,,,,EUR,buy',
+    '2026-01-02T13:00:00Z,2026-01-02,DEFAULT,DELIVERY,FREE_RECEIPT,CRYPTO,COIN,0.5,12,,,,EUR,award',
+  ];
+  const preview = previewCsv(rows.join('\n'));
+  assert.deepEqual(preview.errors, []);
+  assert.deepEqual(preview.rows.map(row => [row.type, row.quantity, row.amount, cashDelta(row).toFixed()]), [
+    ['MIGRATION', '0', '0', '0'], ['MIGRATION', '0', '0', '0'], ['BUY', '1.25', '3', '-3'],
+    ['TRANSFER_IN', '0.5', '6', '0'],
+  ]);
+  assert.match(preview.rows[0].note, /-2/);
+  assert.match(preview.rows[2].note, /estimado/);
+  assert.equal(preview.rows[3].costBasis, null);
+  assert.equal(previewCsv(rows.slice(0, 2).join('\n')).errors[0].row, 2);
 });

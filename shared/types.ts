@@ -1,4 +1,4 @@
-export const transactionTypes = ['DEPOSIT', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'CARD_PAYMENT', 'CARD_REFUND', 'SAVEBACK', 'FEE', 'TAX', 'TAX_REFUND', 'TRANSFER_IN', 'TRANSFER_OUT'] as const;
+export const transactionTypes = ['DEPOSIT', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'CARD_PAYMENT', 'CARD_REFUND', 'DIRECT_DEBIT', 'SAVEBACK', 'REWARD', 'FEE', 'TAX', 'TAX_REFUND', 'TRANSFER_IN', 'TRANSFER_OUT', 'MIGRATION'] as const;
 export type TransactionType = typeof transactionTypes[number];
 export const categories = ['ETF', 'STOCK', 'CRYPTO', 'GOLD', 'FUND', 'BOND', 'DERIVATIVE', 'PRIVATE', 'OTHER'] as const;
 export type Category = typeof categories[number];

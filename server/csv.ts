@@ -2,6 +2,7 @@ import { parse } from 'csv-parse/sync';
 import { createHash } from 'node:crypto';
 import { Decimal } from 'decimal.js';
 import { categories, transactionTypes, type ImportPreview, type Mapping, type Price, type Transaction, type TransactionType } from '../shared/types.js';
+import { isTradeRepublicCsv, normalizeTradeRepublicRow, pairedMigrations } from './tr-csv.js';
 
 const normalize = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const aliases: Record<string, string[]> = {
@@ -30,12 +31,15 @@ add('DIVIDEND', ['dividendo', 'dividende']);
 add('INTEREST', ['interes', 'intereses', 'zins', 'zinsen']);
 add('CARD_PAYMENT', ['pago tarjeta', 'card payment', 'kartenzahlung']);
 add('CARD_REFUND', ['reembolso tarjeta', 'card refund']);
+add('DIRECT_DEBIT', ['domiciliacion']);
 add('SAVEBACK', ['cashback']);
+add('REWARD', ['bonificacion']);
 add('FEE', ['comision', 'comisiones']);
 add('TAX', ['impuesto', 'impuestos']);
 add('TAX_REFUND', ['devolucion de impuestos', 'tax refund']);
 add('TRANSFER_IN', ['traspaso entrada', 'asset transfer in']);
 add('TRANSFER_OUT', ['traspaso salida', 'asset transfer out']);
+add('MIGRATION', ['migracion interna']);
 
 export function numberString(value: string, separator: 'auto' | '.' | ',' = 'auto'): string {
   let s = value.trim().replace(/[€\s\u00a0]/g, '');
@@ -86,11 +90,13 @@ export function fingerprint(tx: Transaction): string {
 
 export function previewCsv(csv: string, existing: Transaction[] = [], supplied?: Mapping, separator: 'auto' | '.' | ',' = 'auto'): ImportPreview {
   const { headers, records } = readCsv(csv);
+  const tradeRepublic = isTradeRepublicCsv(headers);
   const detected: Mapping = {};
   for (const [key, names] of Object.entries(aliases)) {
     const match = headers.find(h => names.map(normalize).includes(normalize(h)));
     if (match) detected[key as keyof Mapping] = match;
   }
+  if (tradeRepublic) detected.category = 'asset_class';
   const mapping = supplied ?? detected;
   for (const col of Object.values(mapping)) if (col && !headers.includes(col)) throw new Error(`Columna no encontrada: ${col}`);
   const result: ImportPreview = { headers, mapping, rows: [], errors: [], duplicates: 0, conflicts: 0, total: records.length, warnings: [] };
@@ -101,11 +107,23 @@ export function previewCsv(csv: string, existing: Transaction[] = [], supplied?:
   result.warnings.push('Importe = bruto, sin comisiones ni impuestos. Revisa esta convención antes de confirmar; no uses un importe neto junto con sus costes.');
   const seen = new Map(existing.map(t => [t.id, fingerprint(t)]));
   const occurrences = new Map<string, number>();
-  records.forEach((record, index) => {
+  const readNumber = (value: string) => numberString(value, separator);
+  const migrations = tradeRepublic ? pairedMigrations(records, readNumber) : new Set();
+  const ordered = records.map((record, index) => ({ record, index }));
+  if (tradeRepublic) {
+    ordered.sort((a, b) => (Date.parse(a.record.datetime) || 0) - (Date.parse(b.record.datetime) || 0));
+  }
+  ordered.forEach(({ record, index }) => {
     const get = (field: keyof Mapping) => record[mapping[field] ?? '']?.trim() ?? '';
     const num = (field: keyof Mapping, fallback = '0') => numberString(get(field) || fallback, separator);
     try {
-      const type = typeMap[normalize(get('type'))];
+      const standardType = typeMap[normalize(get('type'))];
+      const tr = tradeRepublic ? normalizeTradeRepublicRow(
+        { rawType: get('type'), hasAmount: Boolean(get('amount')), amount: num('amount'),
+          quantity: num('quantity'), fee: num('fee'), tax: num('tax') },
+        standardType, () => readNumber(record.price), migrations.has(record),
+      ) : undefined;
+      const type = tr?.type ?? standardType;
       if (!type || !transactionTypes.includes(type)) throw new Error(`Tipo desconocido «${get('type')}». Usa los tipos de la plantilla`);
       const currency = get('currency').toUpperCase() || 'EUR';
       if (currency !== 'EUR') throw new Error(`Divisa ${currency}: convierte primero a EUR con un cambio documentado`);
@@ -114,13 +132,18 @@ export function previewCsv(csv: string, existing: Transaction[] = [], supplied?:
       if (!categories.includes(category as Transaction['category'])) throw new Error(`Categoría desconocida «${categoryInput}»`);
       const tx: Transaction = {
         id: '', date: dateString(get('date')), type, asset: get('asset').toUpperCase(), name: get('name') || get('asset'),
-        category: category as Transaction['category'], quantity: num('quantity'), amount: new Decimal(num('amount')).abs().toString(),
-        fee: num('fee'), tax: num('tax'), currency: 'EUR', costBasis: get('costBasis') ? num('costBasis') : null, note: get('note')
+        category: category as Transaction['category'], quantity: tr?.quantity ?? num('quantity'),
+        amount: tr?.amount ?? new Decimal(num('amount')).abs().toString(),
+        fee: tr?.fee ?? num('fee'), tax: tr?.tax ?? num('tax'), currency: 'EUR',
+        costBasis: get('costBasis') ? num('costBasis') : null, note: [get('note'), tr?.annotation].filter(Boolean).join(' ')
       };
       if ([tx.fee, tx.tax, tx.quantity, tx.costBasis ?? '0'].some(n => new Decimal(n).isNegative())) throw new Error('Cantidad, comisiones, impuestos y coste original deben ser positivos');
       if (['BUY', 'SELL', 'TRANSFER_IN', 'TRANSFER_OUT'].includes(type) && (!tx.asset || !new Decimal(tx.quantity).gt(0))) throw new Error('La operación requiere activo y cantidad mayor que cero');
       if (!['BUY', 'SELL', 'TRANSFER_IN', 'TRANSFER_OUT'].includes(type) && new Decimal(tx.quantity).gt(0)) throw new Error('Solo compras, ventas y traspasos pueden mover unidades');
       if (type !== 'TRANSFER_IN' && tx.costBasis !== null) throw new Error('Coste original solo se admite en traspasos de entrada');
+      if (type === 'MIGRATION' && [tx.amount, tx.fee, tx.tax].some(value => !new Decimal(value).isZero())) {
+        throw new Error('Una migración interna no puede tener importe, comisión ni impuesto');
+      }
       if(get('acquisitionDate')){tx.acquisitionDate=dateString(get('acquisitionDate'));if(type!=='TRANSFER_IN'||tx.acquisitionDate>tx.date)throw new Error('La fecha original solo corresponde a un traspaso de entrada y no puede ser posterior al traspaso');}
       if (tx.asset.length > 80 || tx.name.length > 200 || tx.note.length > 500 || get('id').length > 200) throw new Error('Un campo supera la longitud máxima');
       const hash = fingerprint(tx);
@@ -131,6 +154,7 @@ export function previewCsv(csv: string, existing: Transaction[] = [], supplied?:
         if (seen.get(tx.id) === hash) result.duplicates++;
         else { result.conflicts++; throw new Error('El ID ya existe con datos diferentes; revisa la operación original'); }
       } else { seen.set(tx.id, hash); result.rows.push(tx); }
+      if (tr?.annotation) result.warnings.push(`Fila ${index + 2}: ${tr.annotation}`);
     } catch (error) { result.errors.push({ row: index + 2, message: (error as Error).message }); }
   });
   return result;
