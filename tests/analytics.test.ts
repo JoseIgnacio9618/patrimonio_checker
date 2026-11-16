@@ -66,3 +66,16 @@ test('cash delta direction and monthly compounding match explicit conventions',(
 test('benchmarks are normalized separately and never enter portfolio inventory',()=>{
   const d=analyze([tx({amount:'100'})],[{asset:'BENCH:SP500',date:'2026-01-01',price:'20'},{asset:'BENCH:SP500',date:'2026-01-02',price:'22'}],'2026-01-02');assert.equal(d.value,100);approx(d.benchmarks[0].points[1].value,110);
 });
+
+test('weighted cost uses acquisition commissions and prorates the position after a partial sale', () => {
+  const rows = [
+    tx({ type: 'BUY', asset: 'A', quantity: '10', amount: '100', fee: '2', tax: '1' }),
+    tx({ date: '2026-01-02', type: 'BUY', asset: 'A', quantity: '10', amount: '200' }),
+    tx({ date: '2026-01-03', type: 'SELL', asset: 'A', quantity: '15', amount: '450' }),
+  ];
+  const position = analyze(rows, [{ asset: 'A', date: '2026-01-03', price: '30' }], '2026-01-03').positions[0];
+  assert.equal(position.averageBasis, 75.50);
+  assert.equal(position.averageGain, 74.50);
+  assert.equal(position.cost, 100);
+  assert.equal(position.unrealized, 50);
+});

@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { BrokerSnapshot, Price, SyncRun, Transaction } from '../shared/types.js';
+import type { SavedMarketPrices } from './market-prices.js';
 import type { AnnualTaxRules } from '../shared/tax.js';
 
 export class Store {
@@ -36,6 +37,13 @@ export class Store {
     });
   }
   addPrices(rows: Price[]) { this.atomic(() => { const stmt = this.db.prepare('INSERT INTO prices(asset,date,price) VALUES(?,?,?) ON CONFLICT(asset,date) DO UPDATE SET price=excluded.price'); for (const r of rows) stmt.run(r.asset, r.date, r.price); }); }
+  saveMarketPrices(rows: Price[], market: SavedMarketPrices) {
+    this.atomic(() => {
+      const insert = this.db.prepare('INSERT INTO prices(asset,date,price) VALUES(?,?,?) ON CONFLICT(asset,date) DO NOTHING');
+      for (const row of rows) insert.run(row.asset, row.date, row.price);
+      this.set('marketPrices', market);
+    });
+  }
   imports() { return this.db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 100').all(); }
   setting<T>(key: string, fallback: T): T { const row = this.db.prepare('SELECT json FROM settings WHERE key=?').get(key) as { json: string } | undefined; return row ? JSON.parse(row.json) as T : fallback; }
   set(key: string, value: unknown) { this.db.prepare('INSERT INTO settings(key,json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET json=excluded.json').run(key, JSON.stringify(value)); }

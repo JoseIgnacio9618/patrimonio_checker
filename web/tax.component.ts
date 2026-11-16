@@ -70,6 +70,14 @@ export class TaxComponent implements OnChanges, OnDestroy {
           currency: "EUR",
         }).format(value);
   }
+  priceDate(value: string) {
+    const timed = value.includes("T");
+    const date = new Date(timed ? value : value + "T12:00:00");
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "numeric", month: "short",
+      ...(timed ? { hour: "2-digit", minute: "2-digit" } : {}),
+    }).format(date);
+  }
   percent(n: number) {
     return new Intl.NumberFormat("es-ES", {
       style: "percent",

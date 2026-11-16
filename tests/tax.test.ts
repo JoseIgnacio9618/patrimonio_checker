@@ -271,3 +271,20 @@ test("sell projections are marginal to the current year and joint liquidation cr
   );
   assert.equal(foreignReport.projections[0].additionalTax, null);
 });
+
+test("projections describe missing history and Saveback even when all sales are reviewed", () => {
+  const c = config();
+  c.years["2026"].historyComplete = false;
+  c.years["2026"].saveback = "review";
+  const r = report([
+    tx({ id: "buy", quantity: "2" }),
+    tx({ id: "sell", type: "SELL", amount: "200" }),
+    tx({ id: "reward", type: "SAVEBACK", quantity: "0", amount: "5" }),
+  ], c);
+  assert.equal(r.sales[0].reason, null);
+  assert.equal(r.projections[0].reason, null);
+  assert.equal(r.projections[0].additionalTax, null);
+  assert.equal(r.projectionBlockers?.length, 2);
+  assert.match(r.projectionBlockers![0], /historial/);
+  assert.match(r.projectionBlockers![1], /Saveback/);
+});

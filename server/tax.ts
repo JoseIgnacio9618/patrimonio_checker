@@ -1,4 +1,5 @@
 import { Decimal } from "decimal.js";
+import { selectValuationQuote } from "./analytics.js";
 import type {
   BrokerSnapshot,
   Category,
@@ -364,13 +365,13 @@ export function taxReport(
   year: number,
   annual: Record<string, AnnualTaxRules>,
   asOf = new Date().toISOString().slice(0, 10),
+  latestQuotes: (Price & { quotedAt: string })[] = [],
 ): TaxReport {
   const txs = all
     .filter((t) => t.date <= asOf)
     .sort((a, b) => a.date.localeCompare(b.date));
   const settings = { ...yearDefaults, ...config.years[String(year)] },
-    rules = annual[String(year)] ?? null,
-    supported = settings.regime === "common" && !!rules;
+    rules = annual[String(year)] ?? null;
   const data = process(txs, config, year + "-12-31", txs, asOf, annual),
     sales = data.sales.filter((s) => Number(s.date.slice(0, 4)) === year);
   const byYear = (reportYear: number) => {
@@ -406,40 +407,24 @@ export function taxReport(
           .plus(ys.otherIncome)
           .plus(ys.saveback === "savings" ? rewards : 0),
       );
-    const ready =
-      ys.regime === "common" &&
-      ys.historyComplete &&
-      !!annual[String(reportYear)] &&
-      allSales.every((s) => s.deductible !== null) &&
-      (ys.saveback !== "review" || rewards.isZero());
-    return { ys, capital, income, ready, allSales, rows, rewards };
+    const blockers: string[] = [];
+    if (ys.regime !== "common")
+      blockers.push("Selecciona «Residente España · régimen común» si corresponde a tu situación.");
+    if (!ys.historyComplete)
+      blockers.push("El historial sigue sin confirmar. Revisa las operaciones y los costes de todos tus brókeres y exchanges.");
+    if (!annual[String(reportYear)])
+      blockers.push(`Falta activar la normativa fiscal de ${reportYear}.`);
+    if (allSales.some((s) => s.deductible === null))
+      blockers.push(`Revisa las ventas pendientes en «Ventas realizadas en ${reportYear}».`);
+    if (ys.saveback === "review" && !rewards.isZero())
+      blockers.push("El tratamiento del Saveback sigue en «Pendiente de revisar».");
+    return { ys, capital, income, blockers, allSales, rows };
   };
   const current = byYear(year),
-    settlement =
-      supported && current.ready
-        ? settleSavings(current.capital, current.income, settings, year, rules!)
-        : null;
-  const warnings: string[] = [];
-  if (settings.regime !== "common")
-    warnings.push(
-      "Confirma residencia fiscal en España, régimen común. No se calculan regímenes forales ni no residentes.",
-    );
-  if (!settings.historyComplete)
-    warnings.push(
-      "Confirma que el historial incluye operaciones y costes de todos tus brokers/exchanges. FIFO se aplica por activo a los datos aportados.",
-    );
-  if (!rules)
-    warnings.push(
-      `Importa y revisa un fichero de normativa específico del ejercicio ${year} para activar el cálculo.`,
-    );
-  if (sales.some((s) => s.reason))
-    warnings.push(
-      "Hay ventas con coste, clasificación o pérdidas pendientes de revisión; no se muestra una cuota total incompleta.",
-    );
-  if (settings.saveback === "review" && current.rewards.gt(0))
-    warnings.push(
-      "Confirma la calificación del Saveback: no se incorpora automáticamente a la base del ahorro.",
-    );
+    settlement = current.blockers.length === 0
+      ? settleSavings(current.capital, current.income, settings, year, rules!)
+      : null;
+  const warnings = [...current.blockers];
   if (
     settings.carry.some(
       (c) => c.year < year - (rules?.carryYears ?? 4) || c.year >= year,
@@ -453,8 +438,8 @@ export function taxReport(
   );
   const projectionYear = Number(asOf.slice(0, 4)),
     live = process(txs, config, asOf, txs, asOf, annual),
-    baseline = byYear(projectionYear),
-    base = baseline.ready
+    baseline = projectionYear === year ? current : byYear(projectionYear),
+    base = baseline.blockers.length === 0
       ? settleSavings(
           baseline.capital,
           baseline.income,
@@ -468,6 +453,7 @@ export function taxReport(
     .filter((p) => p.date <= asOf)
     .sort((a, b) => a.date.localeCompare(b.date)))
     quotes.set(p.asset, p);
+  const latestByAsset = new Map(latestQuotes.map((quote) => [quote.asset, quote]));
   const projections: TaxProjection[] = [];
   for (const h of live.holdings.values()) {
     const qty = h.lots.reduce((s, l) => s.plus(l.qty), D(0));
@@ -498,10 +484,10 @@ export function taxReport(
         priceAt = broker.at;
       }
     } else {
-      const q = quotes.get(h.asset);
-      if (q && Date.parse(asOf) - Date.parse(q.date) <= 7 * 86400000) {
+      const q = selectValuationQuote(asOf, quotes.get(h.asset), latestByAsset.get(h.asset));
+      if (q) {
         value = D(q.price).mul(qty);
-        priceAt = q.date;
+        priceAt = q.quotedAt ?? q.date;
       } else reason = "Falta cotización reciente en EUR";
     }
     if (taxCost === null)
@@ -520,9 +506,6 @@ export function taxReport(
       value !== null && taxCost !== null
         ? value.minus(config.saleFee).minus(taxCost)
         : null;
-    if (!base && !reason)
-      reason =
-        "Completa la configuración y las ventas del ejercicio actual para estimar el tramo marginal";
     const hypothetical =
       gain !== null && base && !reason
         ? settleSavings(
@@ -673,6 +656,7 @@ export function taxReport(
         ? money(D(settlement.quota).minus(settings.withholdings))
         : null,
     projections,
+    projectionBlockers: baseline.blockers,
     liquidationTax:
       liquidation && base
         ? money(D(liquidation.quota).minus(base.quota))

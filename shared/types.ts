@@ -17,14 +17,21 @@ export interface ImportPreview {
 }
 export interface Position {
   asset: string; name: string; category: Category; quantity: number;
-  cost: number | null; price: number | null; priceDate: string | null;
+  cost: number | null; price: number | null; priceDate: string | null; priceAt?: string; priceSymbol?: string; priceSource?: string;
+  averageBasis?: number | null; averageGain?: number | null;
   value: number | null; unrealized: number | null; realized: number | null; weight: number | null;
 }
 export interface HistoryPoint {
   date: string; value: number | null; contributions: number | null; cash: number; flow: number | null; income: number;
   twrIndex: number | null;
 }
+export interface MarketPricesStatus {
+  updatedAt: string | null;
+  quotes: number;
+  missing: { asset: string; reason: string }[];
+}
 export interface Dashboard {
+  marketPrices?: MarketPricesStatus;
   broker?: BrokerSnapshot | null;
   brokerHistory?: {at:string;value:number|null}[];
   asOf: string; transactionCount: number; cash: number; value: number | null;

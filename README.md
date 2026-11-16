@@ -43,12 +43,10 @@ Abre http://127.0.0.1:4200. El frontend redirige `/api` al backend local en el p
 
 ## Primeros pasos con tus datos
 
-1. Exporta el historial completo disponible en Trade Republic. Revisa en la aplicación sus opciones de extractos / exportación de transacciones; sus menús y formatos pueden cambiar.
-2. Abre **Importaciones** y selecciona el CSV. Revisa la asignación de columnas y el formato decimal.
-3. **Comprueba la convención de importes antes de confirmar**: este importador usa importe **bruto**, y resta comisiones e impuestos por separado. Si tu exportación contiene importes netos, conviértelos antes o usa costes cero si no puedes desglosarlos sin duplicarlos.
-4. Revisa la muestra de movimientos y corrige todos los errores. La importación de movimientos es atómica: no guarda una parte si existen filas inválidas.
-5. Importa cotizaciones de cierre en EUR para valorar los activos. Necesitas un histórico de precios para las métricas históricas, además de precios recientes para la valoración actual.
-6. Reimporta los históricos actualizados cuando quieras. Un ID repetido idéntico se omite; si sus datos cambian, se muestra un conflicto.
+1. En Trade Republic, abre **Perfil → Extractos → Exportación de transacciones** y descarga el CSV con el historial completo.
+2. Abre **Importaciones** y selecciona el archivo original. Patrimonio detecta el formato, traduce los tipos de movimiento y conserva el ID, el importe bruto, las comisiones y las retenciones. Revisa la vista previa antes de confirmar.
+3. Las cotizaciones se descargan automáticamente para los activos con símbolo reconocido. Puedes añadir precios por CSV en **Importaciones**.
+4. Puedes volver a importar periodos solapados del mismo formato. Se omiten los IDs repetidos con datos económicos idénticos y se muestran como conflictos los IDs con cambios.
 
 El CSV de Trade Republic con columnas `transaction_id`, `account_type` y `asset_class` se reconoce automáticamente. Se respetan los importes brutos y se normalizan los signos de unidades y costes. Cuando falta el importe de una compraventa, la vista previa señala el importe estimado con las unidades y el precio del archivo. Una entrega gratuita registra el valor derivado del precio y deja el coste de adquisición pendiente. Una migración emparejada del mismo activo conserva ambos apuntes sin modificar el saldo ni el coste FIFO. Los tipos desconocidos requieren revisión.
 
@@ -92,7 +90,11 @@ Si falta `costBasis`, la app no inventa un coste cero. La ganancia FIFO y el res
 
 [public/plantilla-precios.csv](public/plantilla-precios.csv): `asset,date,price`, opcionalmente `currency` que debe ser EUR. `price` es el cierre por unidad en euros, estrictamente positivo. Importar de nuevo una fecha/activo actualiza su precio.
 
-La cartera comunicada recibe cotizaciones actuales del SDK en cada recogida. Los cierres históricos y benchmarks se proporcionan mediante CSV: **el SDK no se usa como proveedor de series históricas ajustadas**. Sus ticks actuales se guardan con hora en la fotografía del broker; no se escriben como cierres diarios, para evitar fabricar un histórico. No se confunde el precio de compra con el valor actual. Una cotización ausente o con más de 7 días de antigüedad deja la valoración afectada sin calcular. Para días sin sesión se arrastra el último cierre hasta ese límite, y se indica la fecha del precio.
+La cartera reconstruida usa la punta compradora de LS Exchange en EUR para valores con ISIN cuando está disponible y es reciente. Yahoo Finance proporciona cierres diarios, la última cotización de respaldo y el precio spot BTC/EUR. Mi cartera indica la fuente y hora del precio. Los ETP o futuros de Bitcoin de LS Exchange son instrumentos distintos del BTC spot. Se actualiza cada cinco minutos con el servidor en marcha y también desde **Importaciones → Actualizar precios**. Solo se consultan símbolos y periodos. No requiere conectar Trade Republic. Los precios pueden llegar con retraso y se conserva la hora indicada por el proveedor. Los cierres en USD se convierten con EUR/USD; los cierres ya guardados, incluidos los importados manualmente, se conservan. La cotización más reciente se usa para la valoración actual y se guarda por separado de los cierres históricos.
+
+Para añadir o cambiar símbolos de Yahoo Finance, define la variable de entorno `PATRIMONIO_YAHOO_SYMBOLS` antes de iniciar el servidor. Por ejemplo, `PATRIMONIO_YAHOO_SYMBOLS='{"US0378331005":"AAPL"}' npm start`. Los símbolos sin correspondencia y los fallos de consulta se muestran en **Importaciones**. Si la serie tiene un split, añade los cierres anteriores sin ajustar por CSV para mantenerlos en la misma base que las unidades registradas.
+
+La cartera comunicada por el conector de Trade Republic conserva sus propios precios de mercado. Una cotización con más de siete días de antigüedad deja la valoración afectada sin calcular.
 
 Los símbolos con prefijo `BENCH:`, por ejemplo `BENCH:SP500`, `BENCH:MSCI_WORLD`, `BENCH:GOLD` o `BENCH:BTC`, alimentan comparativas normalizadas a 100. No forman parte de tus posiciones. Usa datos consistentes en EUR, preferiblemente índices de retorno total para comparar carteras que cobran dividendos. Cada serie se normaliza en su primer dato disponible dentro del periodo; si falta el inicio, los horizontes pueden diferir.
 

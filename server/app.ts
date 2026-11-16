@@ -10,6 +10,7 @@ import { parsePrices, previewCsv } from './csv.js';
 import { Store } from './store.js';
 import { createDemo } from './demo.js';
 import type { Connection } from './connection.js';
+import type { MarketPrices } from './market-prices.js';
 import { applyReconciliation, planCsv } from './reconcile.js';
 import { annualRulesSchema, rulesFingerprint, taxPrompt } from './tax-rules.js';
 import { taxDefaults, taxReport } from './tax.js';
@@ -33,7 +34,7 @@ function exportRows(rows: Transaction[]) {
   return rows.map(t => ({ ...t, id:t.id.startsWith('tr:') ? t.id.slice(3) : t.id, costBasis:t.costBasis ?? '' }));
 }
 
-export function createApp(store: Store, connection?: Connection, options: { serveWeb?: boolean } = {}) {
+export function createApp(store: Store, connection?: Connection, options: { serveWeb?: boolean; market?: MarketPrices } = {}) {
   const app = express();
   let demo: Store | undefined;
   app.disable('x-powered-by');
@@ -54,10 +55,28 @@ export function createApp(store: Store, connection?: Connection, options: { serv
   const selected = (req: Request): Store => req.query['demo'] === '1' ? (demo ??= createDemo()) : store;
   const writable = (req: Request) => { if (req.query['demo'] === '1') throw new Error('Sal del modo demo para guardar tus datos'); };
   app.get('/api/health', (_req,res) => res.json({status:'ok', version:'1.2.0'}));
-  app.get('/api/dashboard', (req,res) => { const s=selected(req); res.json({...analyze(s.transactions(),s.prices()),broker:s.snapshot(),brokerHistory:s.snapshotHistory()}); });
+  app.get('/api/dashboard', (req,res) => {
+    const s = selected(req), market = s === store ? options.market : undefined;
+    res.json({ ...analyze(s.transactions(), s.prices(), undefined, market?.quotes()),
+      marketPrices: market?.status(),
+      broker: s.snapshot(), brokerHistory: s.snapshotHistory() });
+  });
+  app.get('/api/prices/market', (req, res) => {
+    res.json(req.query['demo'] === '1' ? null : options.market?.status() ?? null);
+  });
+  app.post('/api/prices/market', async (req, res) => {
+    writable(req);
+    if (!options.market) throw new Error('La actualización de cotizaciones no está disponible');
+    res.json(await options.market.tick(true));
+  });
   app.get('/api/portfolio', (req,res) => res.json(selected(req).snapshot()));
   app.get('/api/portfolio/history', (req,res) => res.json(selected(req).snapshotHistory()));
-  app.get('/api/tax', (req,res)=>{const year=fiscalYear.parse(req.query['year']),s=selected(req);res.json(taxReport(s.transactions(),s.prices(),s.snapshot(),s.setting<TaxConfig>('taxConfig',taxDefaults),year,s.taxRules()));});
+  app.get('/api/tax', (req, res) => {
+    const year = fiscalYear.parse(req.query['year']), s = selected(req);
+    const latestQuotes = s === store ? options.market?.quotes() : undefined;
+    res.json(taxReport(s.transactions(), s.prices(), s.snapshot(),
+      s.setting<TaxConfig>('taxConfig', taxDefaults), year, s.taxRules(), undefined, latestQuotes));
+  });
   app.post('/api/tax/config',(req,res)=>{const body=taxConfigSchema.parse(req.body);selected(req).set('taxConfig',body);res.json(body);});
   app.get('/api/tax/prompt',(req,res)=>{const year=fiscalYear.parse(req.query['year']);res.json({year,prompt:taxPrompt(year)});});
   app.get('/api/tax/schema',(_req,res)=>res.attachment('esquema-normativa-irpf.json').json(z.toJSONSchema(annualRulesSchema,{unrepresentable:'any'})));
@@ -89,6 +108,7 @@ export function createApp(store: Store, connection?: Connection, options: { serv
       return result;
     });
     if (preview.errors.length) { res.status(422).json({error:'Corrige todas las filas antes de importar', errors:preview.errors}); return; }
+    if (plan.rows.length) void options.market?.tick().catch(console.error);
     res.json({added:plan.rows.length,duplicates:preview.duplicates});
   });
   app.post('/api/prices', (req,res) => {

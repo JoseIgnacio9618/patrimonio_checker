@@ -86,6 +86,7 @@ export interface TaxReport {
   salesTax: number | null;
   balanceAfterWithholding: number | null;
   projections: TaxProjection[];
+  projectionBlockers?: string[];
   liquidationTax: number | null;
   warnings: string[];
   sources: { title: string; url: string }[];

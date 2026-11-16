@@ -6,7 +6,18 @@ const D = (n: Decimal.Value) => new Decimal(n);
 const money = (n: Decimal.Value) => Number(D(n).toDecimalPlaces(2));
 const dayMs = 86400000;
 type Lot = { quantity: Decimal; cost: Decimal | null };
-type Holding = { asset: string; name: string; category: Position['category']; quantity: Decimal; lots: Lot[]; realized: Decimal | null; invalid: boolean };
+type Holding = { asset: string; name: string; category: Position['category']; quantity: Decimal; lots: Lot[]; averageBasis: Decimal | null; realized: Decimal | null; invalid: boolean };
+
+type ValuationQuote = Price & { quotedAt?: string; symbol?: string; source?: string };
+
+export function selectValuationQuote(
+  asOf: string, close?: ValuationQuote, latest?: ValuationQuote,
+): ValuationQuote | undefined {
+  const quote = latest && latest.date <= asOf && (!close || latest.date >= close.date)
+    ? latest : close;
+  return quote && quote.date <= asOf && Date.parse(asOf) - Date.parse(quote.date) <= 7 * dayMs
+    ? quote : undefined;
+}
 
 export function cashDelta(tx: Transaction): Decimal {
   const amount = D(tx.amount), costs = D(tx.fee).plus(tx.tax);
@@ -34,7 +45,7 @@ export function xirr(flows: { date: string; amount: number }[]): number | null {
   return Number.isFinite(result) ? result : null;
 }
 
-export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf = new Date().toISOString().slice(0, 10)): Dashboard {
+export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf = new Date().toISOString().slice(0, 10), latestQuotes: ValuationQuote[] = []): Dashboard {
   const txs = allTransactions.filter(t => t.date <= asOf).sort((a, b) => a.date.localeCompare(b.date));
   const warnings = new Set<string>();
   if (txs.length !== allTransactions.length) warnings.add('Hay operaciones futuras: se excluyen hasta su fecha.');
@@ -59,10 +70,11 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
   let previousMonthValue: number | null = 0;
   let lastMonth = startDate.slice(0, 7);
 
-  const getQuote = (asset: string, date: string) => {
-    const quote = quoteMap.get(asset);
-    return quote && (+new Date(date) - +new Date(quote.date)) / dayMs <= 7 ? quote : undefined;
-  };
+  const getQuote = (asset: string, date: string) => selectValuationQuote(date, quoteMap.get(asset));
+  const latestByAsset = new Map(latestQuotes.map(quote => [quote.asset, quote]));
+  const valuationQuote = (asset: string, date: string) => selectValuationQuote(
+    date, quoteMap.get(asset), date === asOf ? latestByAsset.get(asset) : undefined,
+  );
 
   for (let time = +new Date(startDate + 'T00:00:00Z'); time <= +new Date(asOf + 'T00:00:00Z'); time += dayMs) {
     const date = new Date(time).toISOString().slice(0, 10), month = date.slice(0, 7);
@@ -92,11 +104,15 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
         else flow = t.type === 'TRANSFER_IN' ? flow.plus(value) : flow.minus(value);
       }
       if (['BUY', 'SELL', 'TRANSFER_IN', 'TRANSFER_OUT'].includes(t.type)) {
-        const h = holdings.get(t.asset) ?? { asset: t.asset, name: t.name, category: t.category, quantity: D(0), lots: [], realized: D(0), invalid: false };
+        const h = holdings.get(t.asset) ?? { asset: t.asset, name: t.name, category: t.category, quantity: D(0), lots: [], averageBasis: D(0), realized: D(0), invalid: false };
         h.name = t.name || h.name; h.category = t.category === 'OTHER' ? h.category : t.category;
         const qty = D(t.quantity);
         if (t.type === 'BUY' || t.type === 'TRANSFER_IN') {
           const cost = t.type === 'BUY' ? D(t.amount).plus(t.fee).plus(t.tax) : t.costBasis === null ? null : D(t.costBasis).plus(t.fee).plus(t.tax);
+          const averageCost = t.type === 'BUY' ? D(t.amount).plus(t.fee)
+            : t.costBasis === null ? null : D(t.costBasis).plus(t.fee);
+          h.averageBasis = h.averageBasis !== null && averageCost !== null
+            ? h.averageBasis.plus(averageCost) : null;
           h.quantity = h.quantity.plus(qty); h.lots.push({ quantity: qty, cost });
           if (cost === null) warnings.add(`Falta el coste original de ${t.asset}: FIFO y plusvalías incompletos.`);
         } else {
@@ -110,7 +126,11 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
             if (lot.quantity.isZero()) h.lots.shift();
           }
           if (remaining.gt(0)) { totalCost = null; h.invalid = true; warnings.add(`Historial incompleto: salen más unidades de ${t.asset} de las disponibles. Revisa también el orden de operaciones en la misma fecha.`); }
-          h.quantity = h.quantity.minus(qty);
+          const remainingUnits = h.quantity.minus(qty);
+          if (remainingUnits.isZero()) h.averageBasis = D(0);
+          else if (remainingUnits.gt(0) && h.averageBasis !== null)
+            h.averageBasis = h.averageBasis.mul(remainingUnits).div(h.quantity);
+          h.quantity = remainingUnits;
           if (t.type === 'SELL') {
             const proceeds = D(t.amount).minus(t.fee).minus(t.tax);
             const gain = totalCost === null ? null : proceeds.minus(totalCost);
@@ -128,7 +148,7 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
     let value: Decimal | null = cash;
     for (const h of holdings.values()) {
       if (h.quantity.isZero() && !h.invalid) continue;
-      const quote = getQuote(h.asset, date);
+      const quote = valuationQuote(h.asset, date);
       if (!quote || h.invalid || h.quantity.isNegative()) value = null;
       else if (value !== null) value = value.plus(h.quantity.mul(quote.price));
     }
@@ -150,15 +170,17 @@ export function analyze(allTransactions: Transaction[], allPrices: Price[], asOf
   const positions: Position[] = [];
   for (const h of holdings.values()) {
     realized = realized === null || h.realized === null ? null : realized.plus(h.realized);
-    const quote = getQuote(h.asset, asOf), last = quoteMap.get(h.asset);
+    const quote = valuationQuote(h.asset, asOf), last = quote ?? quoteMap.get(h.asset);
     if (h.quantity.isZero() && !h.invalid) continue;
     const cost = h.invalid || h.lots.some(l => l.cost === null) ? null : h.lots.reduce((s, l) => s.plus(l.cost!), D(0));
     const value = quote && !h.invalid && !h.quantity.isNegative() ? h.quantity.mul(quote.price) : null;
     const gain = cost === null || value === null ? null : value.minus(cost);
+    const averageBasis = h.invalid ? null : h.averageBasis;
+    const averageGain = averageBasis === null || value === null ? null : value.minus(averageBasis);
     unrealized = unrealized === null || gain === null ? null : unrealized.plus(gain);
     if (!quote) warnings.add(`Falta cotización reciente en EUR de ${h.asset} (máximo 7 días).`);
-    else if (quote.date !== asOf) warnings.add('Se usa el último cierre disponible, con antigüedad máxima de 7 días.');
-    positions.push({ asset: h.asset, name: h.name, category: h.category, quantity: h.quantity.toNumber(), cost: cost === null ? null : money(cost), price: quote ? Number(quote.price) : null, priceDate: last?.date ?? null, value: value === null ? null : money(value), unrealized: gain === null ? null : money(gain), realized: h.realized === null ? null : money(h.realized), weight: value !== null && latestValue !== null && latestValue > 0 ? value.toNumber() / latestValue : null });
+    else if (quote.date !== asOf) warnings.add('Se usa la última cotización disponible, con antigüedad máxima de 7 días.');
+    positions.push({ asset: h.asset, name: h.name, category: h.category, quantity: h.quantity.toNumber(), cost: cost === null ? null : money(cost), averageBasis: averageBasis === null ? null : money(averageBasis), averageGain: averageGain === null ? null : money(averageGain), price: quote ? Number(quote.price) : null, priceDate: last?.date ?? null, priceAt: quote?.quotedAt, priceSymbol: quote?.symbol, priceSource: quote?.source, value: value === null ? null : money(value), unrealized: gain === null ? null : money(gain), realized: h.realized === null ? null : money(h.realized), weight: value !== null && latestValue !== null && latestValue > 0 ? value.toNumber() / latestValue : null });
   }
   if (cash.isNegative()) warnings.add('El efectivo reconstruido es negativo: puede faltar historial, haber importes netos o comisiones duplicadas. Se ocultan las métricas de rentabilidad.');
   if (!returnsValid && txs.length) warnings.add('Faltan valoraciones históricas completas: importa precios para calcular TWR y riesgo.');

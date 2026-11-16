@@ -448,12 +448,20 @@
       <div>
         <h2>Si vendes hoy cada posición · ejercicio {{ r.projectionYear }}</h2>
         <p>
-          Simulaciones individuales de venta completa, con la comisión elegida y
-          los tramos del ejercicio actual. No sumes estas cuotas como si
-          vendieras todo a la vez.
+          Simulación de venta completa por activo. La ganancia prevista descuenta
+          {{ money(r.config.saleFee) }} de comisión de venta por posición.
+          Para simular una venta conjunta, consulta la estimación de liquidación.
         </p>
       </div>
     </div>
+    @if (r.projectionBlockers?.length) {
+      <div class="info-panel">
+        <strong>Datos pendientes para calcular el impuesto estimado</strong>
+        <ul>
+          @for (reason of r.projectionBlockers; track reason) { <li>{{ reason }}</li> }
+        </ul>
+      </div>
+    }
     <div class="table-wrap">
       <table>
         <thead>
@@ -478,7 +486,7 @@
                 }
               </td>
               <td class="numeric">{{ number(p.quantity) }}</td>
-              <td class="numeric">{{ money(p.value) }}</td>
+              <td class="numeric">{{ money(p.value) }}@if (p.priceAt) {<small>{{ priceDate(p.priceAt) }}</small>}</td>
               <td class="numeric">{{ money(p.cost) }}</td>
               <td class="numeric">{{ money(p.gain) }}</td>
               <td class="numeric">{{ money(p.additionalTax) }}</td>

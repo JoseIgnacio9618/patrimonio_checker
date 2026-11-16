@@ -1,7 +1,7 @@
 import { Component, computed, signal, OnDestroy, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ChartComponent } from './chart.component';
-import type { ConnectionState, Dashboard, ImportPreview, Mapping, SyncRun, Transaction } from '../shared/types';
+import type { ConnectionState, Dashboard, ImportPreview, Mapping, MarketPricesStatus, SyncRun, Transaction } from '../shared/types';
 import { transactionTypes } from '../shared/types';
 import type { EChartsCoreOption } from 'echarts/core';
 import { TaxComponent } from './tax.component';
@@ -37,6 +37,7 @@ export class AppComponent implements OnDestroy {
   inbox=signal<{id:string;timestamp:string;title:string;eventType:string;status:string;outcome:string;reason:string;amount:{value:number;currency:string}}[]>([]);
   runs=signal<SyncRun[]>([]);
   positionTax=signal<TaxReport|null>(null);
+  positionBasis = signal<'average' | 'fifo'>('average');
   portfolioSource=signal<'broker'|'ledger'>('broker');
   intervalMinutes=360; syncEnabled=false;
   tickerRules:{asset:string;id:string;currency:string;divisor:number}[]=[];
@@ -52,7 +53,29 @@ export class AppComponent implements OnDestroy {
   ngOnDestroy(){this.destroyed=true;clearInterval(this.refreshTimer);}
   private async refreshBackground(){
     if(this.busy()||this.destroyed||this.demo())return;
-    try{const c=await this.api<ConnectionState>('connection');if(this.destroyed||this.demo())return;const changed=c.lastSync!==this.connection()?.lastSync;this.connection.set(c);if(changed)this.data.set(await this.api('dashboard'));if(this.view()==='connections'){this.runs.set(await this.api('connection/runs'));this.inbox.set(await this.api('connection/inbox'));}}catch{/* background refresh never hides the last known portfolio */}
+    try {
+      const [connection, prices] = await Promise.all([
+        this.api<ConnectionState>('connection'), this.api<MarketPricesStatus | null>('prices/market'),
+      ]);
+      if (this.destroyed || this.demo() || this.busy()) return;
+      const changed = connection.lastSync !== this.connection()?.lastSync ||
+        prices?.updatedAt !== this.data()?.marketPrices?.updatedAt;
+      this.connection.set(connection);
+      if (changed) {
+        const [dashboard, tax] = await Promise.all([
+          this.api<Dashboard>('dashboard'),
+          this.view() === 'positions' ? this.api<TaxReport>(`tax?year=${new Date().getFullYear()}`) : null,
+        ]);
+        if (!this.destroyed && !this.demo() && !this.busy()) {
+          this.data.set(dashboard);
+          if (tax && this.view() === 'positions') this.positionTax.set(tax);
+        }
+      }
+      if (this.view() === 'connections') {
+        this.runs.set(await this.api('connection/runs'));
+        this.inbox.set(await this.api('connection/inbox'));
+      }
+    } catch { /* Keep the last displayed portfolio if a refresh fails. */ }
   }
   money(n:number|null|undefined){return n==null?'—':euro.format(n);}
   pct(n:number|null|undefined){return n==null?'—':percent.format(n);}
@@ -92,6 +115,12 @@ export class AppComponent implements OnDestroy {
   invalidate(){this.preview.set(null);}
   async analyzeImport(){await this.run(async()=>{this.preview.set(await this.api<ImportPreview>('import/preview',{csv:this.csv,mapping:this.mapping,separator:this.separator}));});}
   async commit(){await this.run(async()=>{const r=await this.api<{added:number;duplicates:number}>('import/commit',{csv:this.csv,mapping:this.mapping,separator:this.separator,name:this.filename});this.notice.set(`${r.added} movimientos importados · ${r.duplicates} duplicados omitidos.`);this.preview.set(null);this.csv='';this.filename='';this.data.set(await this.api('dashboard'));this.imports.set(await this.api('imports'));});}
+  async refreshMarketPrices() {
+    await this.run(async () => {
+      await this.api<MarketPricesStatus>('prices/market', {});
+      this.data.set(await this.api<Dashboard>('dashboard'));
+    });
+  }
   async importPrices(){await this.run(async()=>{const r=await this.api<{added:number}>('prices',{csv:this.priceCsv,separator:this.priceSeparator});this.data.set(await this.api('dashboard'));this.notice.set(`${r.added} cotizaciones guardadas.`);this.priceCsv='';this.priceFilename='';});}
   async loadConnection(){await this.run(async()=>{const c=await this.api<ConnectionState>('connection');this.connection.set(c);this.syncEnabled=c.enabled;this.intervalMinutes=c.intervalMinutes;this.tickerRules=Object.entries(c.tickerOverrides??{}).map(([asset,r])=>({asset,...r}));this.inbox.set(await this.api('connection/inbox'));this.runs.set(await this.api('connection/runs'));});}
   async saveConnection(){await this.run(async()=>{
